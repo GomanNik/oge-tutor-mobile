@@ -4,8 +4,10 @@
  */
 import { ApiError } from './apiError.js';
 import { mapApiErrorPayload, mapBackendResultDto, mapFileResourceDto } from './dto.js';
+import { createRequestId, logger, maskSensitive } from '../shared/logger.js';
 
 const TOKEN_KEY = 'oge-tutor-api-token';
+const TOKEN_META_KEY = 'oge-tutor-api-token-meta';
 
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
@@ -40,38 +42,89 @@ function stripRuntimeFiles(value) {
 
 export function createHttpBackend(baseUrl) {
   const root = normalizeBaseUrl(baseUrl);
-  let token = typeof window !== 'undefined' ? window.sessionStorage.getItem(TOKEN_KEY) : '';
 
-  function persistToken(nextToken) {
+  function readInitialToken() {
+    if (typeof window === 'undefined') return '';
+    const savedToken = window.sessionStorage.getItem(TOKEN_KEY) || '';
+    const savedMeta = window.sessionStorage.getItem(TOKEN_META_KEY) || '';
+    if (savedToken && !savedMeta) {
+      window.sessionStorage.removeItem(TOKEN_KEY);
+      return '';
+    }
+    return savedToken;
+  }
+
+  let token = readInitialToken();
+
+  function persistToken(nextToken, sessionMeta = null) {
     token = nextToken || '';
     if (typeof window === 'undefined') return;
-    if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
-    else window.sessionStorage.removeItem(TOKEN_KEY);
+    if (token) {
+      window.sessionStorage.setItem(TOKEN_KEY, token);
+      window.sessionStorage.setItem(TOKEN_META_KEY, JSON.stringify({
+        savedAt: new Date().toISOString(),
+        sessionId: sessionMeta?.id || '',
+        role: sessionMeta?.role || '',
+        email: sessionMeta?.email || '',
+      }));
+    } else {
+      window.sessionStorage.removeItem(TOKEN_KEY);
+      window.sessionStorage.removeItem(TOKEN_META_KEY);
+    }
+  }
+
+  function hasSessionToken() {
+    if (!token) return false;
+    if (typeof window !== 'undefined' && !window.sessionStorage.getItem(TOKEN_META_KEY)) {
+      persistToken('');
+      return false;
+    }
+    return true;
   }
 
   async function request(path, options = {}) {
+    const requestId = createRequestId();
+    const startedAt = Date.now();
     const headers = new Headers(options.headers || {});
     const isFormData = options.body instanceof FormData;
+    const method = options.method || 'GET';
+    const cleanBody = isFormData || options.body === undefined ? options.body : stripRuntimeFiles(options.body);
 
     if (!isFormData && options.body !== undefined) headers.set('Content-Type', 'application/json');
+    headers.set('x-request-id', requestId);
     if (token) headers.set('Authorization', `Bearer ${token}`);
 
-    const response = await fetch(`${root}${path}`, {
-      ...options,
-      headers,
-      body: isFormData || options.body === undefined ? options.body : JSON.stringify(stripRuntimeFiles(options.body)),
-    });
+    logger.api(`${requestId} ${method} ${path} payload=${JSON.stringify(maskSensitive(cleanBody))}`);
+
+    let response;
+    try {
+      response = await fetch(`${root}${path}`, {
+        ...options,
+        headers,
+        body: isFormData || options.body === undefined ? options.body : JSON.stringify(cleanBody),
+      });
+    } catch (error) {
+      logger.error(`${method} ${path} network failed`, { requestId, message: error?.message });
+      throw new ApiError('Backend недоступен. Проверьте запуск сервера и VITE_API_BASE_URL.', 'network_error', { requestId, status: 0 });
+    }
+
     const payload = await parseResponse(response);
+    const responseRequestId = response.headers.get('x-request-id') || requestId;
+    const duration = Date.now() - startedAt;
 
     if (response.status === 401) persistToken('');
 
     if (!response.ok) {
       const apiError = mapApiErrorPayload(payload, response.status);
-      throw new ApiError(apiError.message, apiError.code, apiError);
+      const details = { ...apiError, requestId: apiError.requestId || responseRequestId };
+      logger.api(`${responseRequestId} ${method} ${path} -> ${response.status} ${duration}ms code=${details.code}`, { fieldErrors: details.fieldErrors });
+      throw new ApiError(details.message, details.code, details);
     }
 
+    logger.api(`${responseRequestId} ${method} ${path} -> ${response.status} ${duration}ms`);
     const mappedPayload = mapBackendResultDto(payload);
-    if (mappedPayload?.session?.token) persistToken(mappedPayload.session.token);
+    mappedPayload.requestId = responseRequestId;
+    if (mappedPayload?.session?.token) persistToken(mappedPayload.session.token, mappedPayload.session);
     return mappedPayload;
   }
 
@@ -173,6 +226,7 @@ export function createHttpBackend(baseUrl) {
   }
 
   return {
+    hasSessionToken,
     bootstrap: () => request('/bootstrap'),
     login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
     logout: async () => {

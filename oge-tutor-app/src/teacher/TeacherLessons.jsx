@@ -19,6 +19,7 @@ import {
   timeInputValue,
 } from '../shared/dateTime.js';
 import { formatMaterialCount, parseTaskNumberInput } from '../shared/formatters.js';
+import { logger } from '../shared/logger.js';
 import { Badge, Button, Card, Field, Header, MaterialList, RowCard, Section, SelectField, TextArea, iconByStatus, toneByStatus } from '../shared/ui.jsx';
 
 const getStudent = selectStudent;
@@ -101,6 +102,40 @@ function validateLessonForm(form, data, { excludeLessonId = '', allowPast = fals
   return { error: '', schedule, taskNumbers: tasks.taskNumbers };
 }
 
+
+function newestLesson(lessons) {
+  return [...lessons]
+    .filter((lesson) => lesson?.id)
+    .sort((a, b) => Date.parse(b.createdAt || b.updatedAt || b.startAt || 0) - Date.parse(a.createdAt || a.updatedAt || a.startAt || 0))[0] || null;
+}
+
+function findCreatedLessonId(result, previousLessonIds, draft) {
+  if (result?.lesson?.id) return result.lesson.id;
+
+  const candidates = [];
+  if (Array.isArray(result?.resources?.lessons)) candidates.push(...result.resources.lessons);
+  if (Array.isArray(result?.data?.lessons)) candidates.push(...result.data.lessons);
+  if (Array.isArray(result?.lessons)) candidates.push(...result.lessons);
+
+  const newLessons = candidates.filter((lesson) => lesson?.id && !previousLessonIds.has(lesson.id));
+  const exactCreated = newLessons.find((lesson) => (
+    lesson.studentId === draft.studentId
+    && lesson.topic === draft.topic
+    && lesson.startAt === draft.startAt
+  ));
+  if (exactCreated?.id) return exactCreated.id;
+
+  const exactExisting = candidates.find((lesson) => (
+    lesson?.id
+    && lesson.studentId === draft.studentId
+    && lesson.topic === draft.topic
+    && lesson.startAt === draft.startAt
+  ));
+  if (exactExisting?.id) return exactExisting.id;
+
+  return newestLesson(newLessons)?.id || '';
+}
+
 export function LessonsList({ data, openCreate, openLesson }) {
   const planned = data.lessons.filter((item) => ACTIVE_LESSON_STATUSES.includes(item.status));
   const history = data.lessons.filter((item) => HISTORY_LESSON_STATUSES.includes(item.status));
@@ -138,6 +173,7 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   const isEditable = ACTIVE_LESSON_STATUSES.includes(lesson.status);
 
   async function saveEdit() {
+    logger.ui('action=lesson.update.click screen=TeacherLessons userRole=teacher', { lessonId: lesson.id });
     const validated = validateLessonForm(form, data, { excludeLessonId: lesson.id });
     if (validated.error) {
       setError(validated.error);
@@ -151,14 +187,17 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.updateLesson(lesson.id, {
+      const payload = {
         studentId: form.studentId,
         ...validated.schedule,
         topic: form.topic.trim(),
         focusTaskNumbers: validated.taskNumbers,
         note: form.note.trim(),
         materials: form.materials,
-      });
+      };
+      logger.form('lesson.update.submit', { lessonId: lesson.id, ...payload });
+      await actions.updateLesson(lesson.id, payload);
+      logger.nav('after lesson.update view lessonId=' + lesson.id, { lessonId: lesson.id });
       setMode('view');
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить урок.');
@@ -168,6 +207,7 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   }
 
   async function transferLesson() {
+    logger.ui('action=lesson.transfer.click screen=TeacherLessons userRole=teacher', { lessonId: lesson.id });
     const validated = validateLessonForm(form, data, { excludeLessonId: lesson.id });
     if (validated.error) {
       setError(validated.error);
@@ -177,11 +217,14 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.updateLesson(lesson.id, {
+      const payload = {
         ...validated.schedule,
         note: form.note.trim(),
         status: LESSON_STATUS.RESCHEDULED,
-      });
+      };
+      logger.form('lesson.transfer.submit', { lessonId: lesson.id, ...payload });
+      await actions.updateLesson(lesson.id, payload);
+      logger.nav('after lesson.transfer view lessonId=' + lesson.id, { lessonId: lesson.id });
       setMode('view');
     } catch (err) {
       setError(err?.message || 'Не удалось перенести урок.');
@@ -191,10 +234,13 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   }
 
   async function cancelLesson() {
+    logger.ui('action=lesson.cancel.click screen=TeacherLessons userRole=teacher', { lessonId: lesson.id });
     try {
       setIsSaving(true);
       setError('');
+      logger.form('lesson.cancel.submit', { lessonId: lesson.id, status: LESSON_STATUS.CANCELED });
       await actions.updateLesson(lesson.id, { status: LESSON_STATUS.CANCELED });
+      logger.nav('after lesson.cancel view lessonId=' + lesson.id, { lessonId: lesson.id });
     } catch (err) {
       setError(err?.message || 'Не удалось отменить урок.');
     } finally {
@@ -203,6 +249,7 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   }
 
   async function completeLesson() {
+    logger.ui('action=lesson.complete.click screen=TeacherLessons userRole=teacher', { lessonId: lesson.id });
     const tasks = validateTaskNumbers(form.focusTaskNumbers, { required: true });
     if (tasks.error) {
       setError(tasks.error);
@@ -212,10 +259,13 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.completeLesson(lesson.id, {
+      const payload = {
         focusTaskNumbers: tasks.taskNumbers,
         completionComment: form.completionComment.trim(),
-      });
+      };
+      logger.form('lesson.complete.submit', { lessonId: lesson.id, ...payload });
+      await actions.completeLesson(lesson.id, payload);
+      logger.nav('after lesson.complete view lessonId=' + lesson.id, { lessonId: lesson.id });
       setMode('view');
     } catch (err) {
       setError(err?.message || 'Не удалось завершить урок.');
@@ -320,12 +370,13 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   );
 }
 
-export function CreateLesson({ data, actions, onBack }) {
+export function CreateLesson({ data, actions, onBack, onCreated }) {
   const [form, setForm] = useState({ studentId: '', date: '', time: '', durationMinutes: '60', timezone: appTimezone(), topic: '', focusTaskNumbers: '', note: '', materials: [] });
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   async function submit() {
+    logger.ui('action=lesson.create.click screen=TeacherLessons userRole=teacher');
     const validated = validateLessonForm(form, data);
     if (validated.error) {
       setError(validated.error);
@@ -339,7 +390,7 @@ export function CreateLesson({ data, actions, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.createLesson({
+      const draft = {
         studentId: form.studentId,
         ...validated.schedule,
         source: LESSON_SOURCE.MANUAL,
@@ -347,7 +398,20 @@ export function CreateLesson({ data, actions, onBack }) {
         focusTaskNumbers: validated.taskNumbers,
         note: form.note.trim(),
         materials: form.materials,
-      });
+      };
+      logger.form('lesson.create.submit', draft);
+      const previousLessonIds = new Set((data.lessons || []).map((lesson) => lesson.id));
+      const result = await actions.createLesson(draft);
+      const createdLessonId = findCreatedLessonId(result, previousLessonIds, draft);
+
+      if (createdLessonId && typeof onCreated === 'function') {
+        logger.nav('after lesson.create open lessonId=' + createdLessonId, { lessonId: createdLessonId, requestId: result?.requestId });
+        onCreated(createdLessonId);
+        return;
+      }
+
+      logger.nav('fallback to lessons.list reason=lessonId_missing', { requestId: result?.requestId });
+      setError('Урок создан, но frontend не получил id созданного урока. Обновите список уроков.');
       onBack();
     } catch (err) {
       setError(err?.message || 'Не удалось создать урок.');

@@ -12,6 +12,7 @@ import {
   normalizeText,
 } from '../shared/formatters.js';
 import { Button, Card, Field, Header, MaterialList, RowCard, Section, cx } from '../shared/ui.jsx';
+import { logger } from '../shared/logger.js';
 import { validateTaskNumbersInput } from '../shared/validation.js';
 
 function findTopic(data, topicId) {
@@ -51,9 +52,11 @@ function MaterialTopicDetail({ topic, actions, onBack }) {
   async function removeFile(indexToRemove) {
     const file = topic.files[indexToRemove];
     if (!file?.id) return;
+    logger.ui('action=material.remove.click screen=TeacherMaterials userRole=teacher', { topicId: topic.id, fileId: file.id });
 
     try {
       setError('');
+      logger.form('material.remove.submit', { topicId: topic.id, fileId: file.id });
       await actions.removeMaterialFile(topic.id, file.id);
     } catch (err) {
       setError(err?.message || 'Не удалось удалить материал.');
@@ -78,6 +81,7 @@ export function UploadMaterial({ data, actions, onBack }) {
   const [isSaving, setIsSaving] = useState(false);
 
   async function submit() {
+    logger.ui('action=material.upload.click screen=TeacherMaterials userRole=teacher');
     const taskValidation = validateTaskNumbersInput(form.taskNumber, { required: true });
     const taskNumber = taskValidation.taskNumbers[0];
     const cleanTopicTitle = normalizeText(form.title);
@@ -116,7 +120,7 @@ export function UploadMaterial({ data, actions, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.addMaterial({
+      const payload = {
         taskNumber,
         topicTitle: cleanTopicTitle,
         type: mode,
@@ -124,7 +128,10 @@ export function UploadMaterial({ data, actions, onBack }) {
         file: form.file,
         fileName: cleanFileName,
         url: cleanLink,
-      });
+      };
+      logger.form('material.upload.submit', { ...payload, file: form.file ? { name: form.file.name, size: form.file.size } : null });
+      const result = await actions.addMaterial(payload);
+      logger.nav('after material.upload back to list', { materialId: result?.material?.id, requestId: result?.requestId });
       onBack();
     } catch (err) {
       setError(err?.message || 'Не удалось загрузить материал.');

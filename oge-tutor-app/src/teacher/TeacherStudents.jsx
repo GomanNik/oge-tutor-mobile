@@ -9,6 +9,7 @@ import { getStudentProgressView } from '../domain/progress/index.js';
 import { selectStudent } from '../app/selectors.js';
 import { formatDateLabel, formatTimeLabel } from '../shared/dateTime.js';
 import { formatMaterialCount } from '../shared/formatters.js';
+import { logger } from '../shared/logger.js';
 import { Avatar, Badge, Button, Card, Field, Header, RowCard, Section, TextArea, cx, iconByStatus, solidBg, toneByStatus } from '../shared/ui.jsx';
 import { StudentProgressTab } from './student-progress/StudentProgressTab.jsx';
 
@@ -65,10 +66,20 @@ export function CreateStudent({ actions, onBack }) {
   const [isSaving, setIsSaving] = useState(false);
 
   async function submit() {
+    logger.ui('action=student.create.click screen=TeacherStudents userRole=teacher');
     try {
       setIsSaving(true);
       setError('');
-      await actions.createStudent(form);
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        grade: form.grade.trim(),
+        goal: form.goal.trim(),
+        note: form.note.trim(),
+      };
+      logger.form('student.create.submit', payload);
+      const result = await actions.createStudent(payload);
+      logger.nav('after student.create back to list', { studentId: result?.student?.id, requestId: result?.requestId });
       onBack();
     } catch (err) {
       setError(err?.message || 'Не удалось создать ученика.');
@@ -114,6 +125,7 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
   const studentMaterials = data.materials.filter((topic) => relevantTaskNumbers.has(Number(topic.taskNumber)));
 
   async function runAccessAction(action, successText) {
+    logger.ui('action=student.access.click screen=TeacherStudents userRole=teacher', { studentId: student.id });
     try {
       setAccessError('');
       setAccessMessage('');

@@ -148,7 +148,7 @@ export function mapTeacherDto(dto) {
     id: requireStringField(dto, 'id', 'TeacherDto'),
     role: ROLE.TEACHER,
     name: requireStringField(dto, 'name', 'TeacherDto'),
-    email: requireStringField(dto, 'email', 'TeacherDto'),
+    email: requireStringField({ email: dto.email || dto.user?.email }, 'email', 'TeacherDto'),
     avatar: asOptionalString(dto.avatar),
     bg: asOptionalString(dto.bg),
     settings: mapSettingsDto(dto.settings),
@@ -260,9 +260,10 @@ export function mapStudentDto(dto) {
     teacherId: asOptionalString(dto.teacherId),
     role: ROLE.STUDENT,
     name: requireStringField(dto, 'name', 'StudentDto'),
-    email: requireStringField(dto, 'email', 'StudentDto'),
+    email: requireStringField({ email: dto.email || dto.user?.email }, 'email', 'StudentDto'),
     grade: asOptionalString(dto.grade),
     goal: asOptionalString(dto.goal),
+    note: asOptionalString(dto.note),
     avatar: asOptionalString(dto.avatar),
     bg: asOptionalString(dto.bg),
     access: normalizeAccessStatusDto(dto.access),
@@ -382,11 +383,10 @@ export function mapDataDto(dto) {
 
 export function mapBackendResultDto(dto) {
   if (!isRecord(dto)) return {};
-  return {
-    ...dto,
-    data: dto.data === undefined ? undefined : mapDataDto(dto.data),
-    session: dto.session === undefined ? undefined : mapSessionDto(dto.session),
-  };
+  const result = { ...dto };
+  if (dto.data !== undefined) result.data = mapDataDto(dto.data);
+  if (dto.session !== undefined) result.session = mapSessionDto(dto.session);
+  return result;
 }
 
 export function mapApiErrorPayload(payload, status = 0, fallbackMessage = 'Backend вернул ошибку.') {

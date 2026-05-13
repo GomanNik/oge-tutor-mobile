@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createApiClient } from '../api/apiClient.js';
+import { logger } from '../shared/logger.js';
 import { STUDENT_ACCESS_ACTION } from '../api/contracts.js';
 import { getErrorMessage } from '../api/apiError.js';
 import {
@@ -117,7 +118,35 @@ function singularPatchApplier(result) {
 
 function resourcePatchFromResult(result) {
   if (!result || typeof result !== 'object') return null;
-  return resourcePatchFromBulkResult(result) || singularPatchApplier(result);
+  const bulkPatch = resourcePatchFromBulkResult(result);
+  const singularPatch = singularPatchApplier(result);
+
+  if (bulkPatch && singularPatch) {
+    return (previous) => {
+      const base = bulkPatch.mode === 'replace'
+        ? bulkPatch.patch
+        : mergeResourcePatch(previous, bulkPatch.patch);
+      return singularPatch(base);
+    };
+  }
+
+  return singularPatch || bulkPatch;
+}
+
+function summarizePatch(result, nextPatch) {
+  if (!result || typeof result !== 'object') return { mode: 'empty' };
+  if (result.data) {
+    return {
+      mode: 'replace',
+      students: result.data.students?.length || 0,
+      lessons: result.data.lessons?.length || 0,
+      homeworks: result.data.homeworks?.length || 0,
+      materials: result.data.materials?.length || 0,
+      notifications: result.data.notifications?.length || 0,
+    };
+  }
+  if (typeof nextPatch === 'function') return { mode: 'singular' };
+  return { mode: nextPatch?.mode || 'none' };
 }
 
 export function useBackendStore() {
@@ -131,12 +160,14 @@ export function useBackendStore() {
   const busy = busyCount > 0;
 
   function resetAuthState() {
+    logger.state('reset auth state');
     setSession(null);
     setResources(EMPTY_RESOURCES);
   }
 
   function applyResult(result) {
     const nextPatch = resourcePatchFromResult(result);
+    logger.state('applyResponse', { requestId: result?.requestId, ...summarizePatch(result, nextPatch) });
     if (typeof nextPatch === 'function') {
       setResources((previous) => nextPatch(previous));
     } else if (nextPatch?.mode === 'replace') {
@@ -145,8 +176,9 @@ export function useBackendStore() {
       setResources((previous) => mergeResourcePatch(previous, nextPatch.patch));
     }
 
-    if ('session' in (result || {})) {
+    if ((result || {}).session !== undefined) {
       const nextSession = result.session || null;
+      logger.state('applySession', { role: nextSession?.role || null, id: nextSession?.id || null });
       setSession(nextSession);
       if (!nextSession) setResources(EMPTY_RESOURCES);
     }
@@ -159,16 +191,26 @@ export function useBackendStore() {
       try {
         setLoading(true);
         if (api.__configurationError) throw api.__configurationError;
+        if (typeof api.hasSessionToken === 'function' && !api.hasSessionToken()) {
+          logger.store('bootstrap.skip reason=no_token');
+          resetAuthState();
+          setError('');
+          return;
+        }
+        logger.store('bootstrap.start');
         const result = await api.bootstrap();
         if (!alive) return;
         applyResult(result);
+        logger.store('bootstrap.ok', { requestId: result?.requestId });
         setError('');
       } catch (err) {
         if (!alive) return;
         if (isUnauthorizedApiError(err)) {
+          logger.store('bootstrap.unauthorized');
           resetAuthState();
           setError('');
         } else {
+          logger.error('bootstrap failed', { code: err?.code, requestId: err?.details?.requestId, message: getErrorMessage(err) });
           setError(getErrorMessage(err));
         }
       } finally {
@@ -181,18 +223,21 @@ export function useBackendStore() {
   }, [api]);
 
   const run = useCallback(async function run(operation, options = {}) {
-    const { globalError = true } = options;
+    const { globalError = true, action = 'operation' } = options;
     try {
+      logger.store(`${action}.start`);
       setBusyCount((value) => value + 1);
       if (globalError) setError('');
       if (api.__configurationError) throw api.__configurationError;
       const result = await operation();
       applyResult(result);
+      logger.store(`${action}.ok`, { requestId: result?.requestId });
       return result;
     } catch (err) {
       const message = getErrorMessage(err);
       if (isUnauthorizedApiError(err)) resetAuthState();
       if (globalError) setError(message);
+      logger.error(`${action} failed`, { code: err?.code, requestId: err?.details?.requestId, message });
       throw err;
     } finally {
       setBusyCount((value) => Math.max(0, value - 1));
@@ -200,35 +245,35 @@ export function useBackendStore() {
   }, [api]);
 
   const actions = useMemo(() => ({
-    updateTeacherProfile: (patch) => run(() => api.updateTeacherProfile(patch)),
-    updateTeacherAccount: (payload) => run(() => api.updateTeacherAccount(payload)),
-    changeTeacherPassword: (payload) => run(() => api.changeTeacherPassword(payload)),
-    updateTeacherNotifications: (payload) => run(() => api.updateTeacherNotifications(payload)),
+    updateTeacherProfile: (patch) => run(() => api.updateTeacherProfile(patch), { action: 'updateTeacherProfile' }),
+    updateTeacherAccount: (payload) => run(() => api.updateTeacherAccount(payload), { action: 'updateTeacherAccount' }),
+    changeTeacherPassword: (payload) => run(() => api.changeTeacherPassword(payload), { action: 'changeTeacherPassword' }),
+    updateTeacherNotifications: (payload) => run(() => api.updateTeacherNotifications(payload), { action: 'updateTeacherNotifications' }),
 
-    updateStudentProfile: (studentId, patch) => run(() => api.updateStudentProfile(studentId, patch)),
-    updateStudentAccount: (studentId, payload) => run(() => api.updateStudentAccount(studentId, payload)),
-    changeStudentPassword: (studentId, payload) => run(() => api.changeStudentPassword(studentId, payload)),
-    updateStudentNotifications: (studentId, payload) => run(() => api.updateStudentNotifications(studentId, payload)),
-    updateStudentProgress: (studentId, payload) => run(() => api.updateStudentProgress(studentId, payload)),
-    updateTaskProgress: (studentId, taskNumber, payload) => run(() => api.updateTaskProgress(studentId, taskNumber, payload)),
-    resolveProgressAssessment: (studentId, taskNumber, payload) => run(() => api.resolveProgressAssessment(studentId, taskNumber, payload)),
+    updateStudentProfile: (studentId, patch) => run(() => api.updateStudentProfile(studentId, patch), { action: 'updateStudentProfile' }),
+    updateStudentAccount: (studentId, payload) => run(() => api.updateStudentAccount(studentId, payload), { action: 'updateStudentAccount' }),
+    changeStudentPassword: (studentId, payload) => run(() => api.changeStudentPassword(studentId, payload), { action: 'changeStudentPassword' }),
+    updateStudentNotifications: (studentId, payload) => run(() => api.updateStudentNotifications(studentId, payload), { action: 'updateStudentNotifications' }),
+    updateStudentProgress: (studentId, payload) => run(() => api.updateStudentProgress(studentId, payload), { action: 'updateStudentProgress' }),
+    updateTaskProgress: (studentId, taskNumber, payload) => run(() => api.updateTaskProgress(studentId, taskNumber, payload), { action: 'updateTaskProgress' }),
+    resolveProgressAssessment: (studentId, taskNumber, payload) => run(() => api.resolveProgressAssessment(studentId, taskNumber, payload), { action: 'resolveProgressAssessment' }),
 
-    createStudent: (payload) => run(() => api.createStudent(payload)),
-    resendStudentInvite: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESEND_INVITE)),
-    resetStudentPassword: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESET_PASSWORD)),
-    disableStudentAccess: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.DISABLE)),
+    createStudent: (payload) => run(() => api.createStudent(payload), { action: 'createStudent' }),
+    resendStudentInvite: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESEND_INVITE), { action: 'resendStudentInvite' }),
+    resetStudentPassword: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESET_PASSWORD), { action: 'resetStudentPassword' }),
+    disableStudentAccess: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.DISABLE), { action: 'disableStudentAccess' }),
 
-    createLesson: (payload) => run(() => api.createLesson(payload)),
-    updateLesson: (lessonId, patch) => run(() => api.updateLesson(lessonId, patch)),
-    completeLesson: (lessonId, payload) => run(() => api.completeLesson(lessonId, payload)),
+    createLesson: (payload) => run(() => api.createLesson(payload), { action: 'createLesson' }),
+    updateLesson: (lessonId, patch) => run(() => api.updateLesson(lessonId, patch), { action: 'updateLesson' }),
+    completeLesson: (lessonId, payload) => run(() => api.completeLesson(lessonId, payload), { action: 'completeLesson' }),
 
-    createHomework: (payload) => run(() => api.createHomework(payload)),
-    updateHomework: (homeworkId, patch) => run(() => api.updateHomework(homeworkId, patch)),
-    submitHomeworkSolution: (homeworkId, payload) => run(() => api.submitHomeworkSolution(homeworkId, payload)),
-    reviewHomework: (homeworkId, payload) => run(() => api.reviewHomework(homeworkId, payload)),
+    createHomework: (payload) => run(() => api.createHomework(payload), { action: 'createHomework' }),
+    updateHomework: (homeworkId, patch) => run(() => api.updateHomework(homeworkId, patch), { action: 'updateHomework' }),
+    submitHomeworkSolution: (homeworkId, payload) => run(() => api.submitHomeworkSolution(homeworkId, payload), { action: 'submitHomeworkSolution' }),
+    reviewHomework: (homeworkId, payload) => run(() => api.reviewHomework(homeworkId, payload), { action: 'reviewHomework' }),
 
-    addMaterial: (payload) => run(() => api.addMaterial(payload)),
-    removeMaterialFile: (topicId, fileId) => run(() => api.removeMaterialFile(topicId, fileId)),
+    addMaterial: (payload) => run(() => api.addMaterial(payload), { action: 'addMaterial' }),
+    removeMaterialFile: (topicId, fileId) => run(() => api.removeMaterialFile(topicId, fileId), { action: 'removeMaterialFile' }),
   }), [api, run]);
 
   return {
@@ -237,9 +282,9 @@ export function useBackendStore() {
     loading,
     busy,
     error,
-    login: (email, password) => run(() => api.login({ email, password }), { globalError: false }),
-    logout: () => run(() => api.logout()),
-    requestPasswordReset: (email) => run(() => api.requestPasswordReset({ email }), { globalError: false }),
+    login: (email, password) => run(() => api.login({ email, password }), { globalError: false, action: 'login' }),
+    logout: () => run(() => api.logout(), { action: 'logout' }),
+    requestPasswordReset: (email) => run(() => api.requestPasswordReset({ email }), { globalError: false, action: 'requestPasswordReset' }),
     actions,
   };
 }

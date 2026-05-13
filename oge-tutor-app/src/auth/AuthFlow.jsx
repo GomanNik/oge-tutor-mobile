@@ -4,6 +4,7 @@
  */
 import React, { useState } from 'react';
 import { getErrorMessage } from '../api/apiError.js';
+import { logger } from '../shared/logger.js';
 import { Button, Field } from '../shared/ui.jsx';
 
 export default function AuthFlow({ onLogin, onPasswordReset, busy = false }) {
@@ -12,32 +13,44 @@ export default function AuthFlow({ onLogin, onPasswordReset, busy = false }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  async function submitLogin() {
+  async function submitLogin(event) {
+    event?.preventDefault?.();
+    logger.ui('action=auth.login.submit screen=AuthFlow');
     setError('');
     if (!email.trim() || !password) {
       setError('Введите email и пароль.');
+      logger.warn('auth.login.validation_failed', { fieldErrors: { email: !email.trim(), password: !password } });
       return;
     }
 
     try {
+      logger.form('auth.login.submit', { email: email.trim(), password: '[masked]' });
       await onLogin(email.trim(), password);
     } catch (err) {
-      setError(getErrorMessage(err));
+      const message = getErrorMessage(err);
+      logger.error('auth.login.failed', { code: err?.code, requestId: err?.details?.requestId, message });
+      setError(message);
     }
   }
 
-  async function submitRecovery() {
+  async function submitRecovery(event) {
+    event?.preventDefault?.();
+    logger.ui('action=auth.password_reset.submit screen=AuthFlow');
     setError('');
     if (!email.trim()) {
       setError('Введите email аккаунта.');
+      logger.warn('auth.password_reset.validation_failed', { fieldErrors: { email: true } });
       return;
     }
 
     try {
+      logger.form('auth.password_reset.submit', { email: email.trim() });
       await onPasswordReset(email.trim());
       setMode('sent');
     } catch (err) {
-      setError(getErrorMessage(err));
+      const message = getErrorMessage(err);
+      logger.error('auth.password_reset.failed', { code: err?.code, requestId: err?.details?.requestId, message });
+      setError(message);
     }
   }
 
@@ -53,12 +66,12 @@ export default function AuthFlow({ onLogin, onPasswordReset, busy = false }) {
         <div className="auth-card">
           <h1 className="auth-title">Вход</h1>
           {error ? <div className="auth-error">{error}</div> : null}
-          <div className="form-stack">
+          <form className="form-stack" onSubmit={submitLogin}>
             <Field label="Email" value={email} onChange={setEmail} placeholder="example@mail.ru" />
             <Field label="Пароль" type="password" value={password} onChange={setPassword} placeholder="Введите пароль" />
-            <Button onClick={submitLogin} disabled={busy}>{busy ? 'Входим…' : 'Войти'}</Button>
-            <button className="link-btn" onClick={() => { setMode('recovery'); setError(''); }}>Забыли пароль?</button>
-          </div>
+            <Button type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти'}</Button>
+            <button type="button" className="link-btn" onClick={() => { setMode('recovery'); setError(''); }}>Забыли пароль?</button>
+          </form>
         </div>
       ) : null}
 
@@ -70,10 +83,10 @@ export default function AuthFlow({ onLogin, onPasswordReset, busy = false }) {
           <h1 className="auth-title">Восстановление пароля</h1>
           <p className="auth-note">Введите email аккаунта. Запрос уйдёт в backend, который отправит письмо для установки нового пароля.</p>
           {error ? <div className="auth-error">{error}</div> : null}
-          <div className="form-stack">
+          <form className="form-stack" onSubmit={submitRecovery}>
             <Field label="Email" value={email} onChange={setEmail} placeholder="example@mail.ru" />
-            <Button onClick={submitRecovery} disabled={busy}>{busy ? 'Отправляем…' : 'Отправить письмо'}</Button>
-          </div>
+            <Button type="submit" disabled={busy}>{busy ? 'Отправляем…' : 'Отправить письмо'}</Button>
+          </form>
         </div>
       ) : null}
 

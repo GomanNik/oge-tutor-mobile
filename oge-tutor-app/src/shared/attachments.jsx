@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Field, MaterialList, cx } from './ui.jsx';
+import { logger } from './logger.js';
 import {
   buildFileMaterialFromFile,
   buildLibraryMaterial,
@@ -82,6 +83,7 @@ export function MaterialPicker({
 
   function setAttachments(nextItems) {
     setMessage('');
+    logger.state('attachments.changed', { title, count: nextItems?.length || 0 });
     onChange?.(nextItems);
   }
 
@@ -137,7 +139,9 @@ export function MaterialPicker({
       return;
     }
 
-    onChange?.([...(value || []), ...unique]);
+    const nextItems = [...(value || []), ...unique];
+    logger.ui('action=attachment.library.add screen=MaterialPicker', { title, count: unique.length });
+    onChange?.(nextItems);
     setSelectedLibraryKeys([]);
     setMessage(existing.length ? 'Часть материалов уже была прикреплена, добавлены только новые.' : 'Материалы прикреплены.');
   }
@@ -150,6 +154,7 @@ export function MaterialPicker({
 
     const cleanFileName = normalizeText(fileName || selectedFile.name);
 
+    logger.ui('action=attachment.file.add screen=MaterialPicker', { title, fileName: cleanFileName, fileSize: selectedFile.size });
     if (addOne(buildFileMaterialFromFile(selectedFile, cleanFileName))) {
       setFileName('');
       setSelectedFile(null);
@@ -170,6 +175,7 @@ export function MaterialPicker({
       return;
     }
 
+    logger.ui('action=attachment.link.add screen=MaterialPicker', { title, url: cleanLink });
     if (addOne(buildLinkMaterial(cleanLink))) {
       setLinkUrl('');
       setMessage('Ссылка прикреплена.');

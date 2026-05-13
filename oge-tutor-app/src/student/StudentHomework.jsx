@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { HOMEWORK_STATUS, statusLabel } from '../api/contracts.js';
 import { formatDateLabel, formatDateTimeLabel } from '../shared/dateTime.js';
 import { Badge, Button, Card, Field, Header, MaterialList, RowCard, Section, iconByStatus, toneByStatus } from '../shared/ui.jsx';
+import { logger } from '../shared/logger.js';
 
 function homeworkDueLabel(homework) {
   return formatDateLabel(homework?.dueAt || homework?.deadline, 'дедлайн не указан');
@@ -39,6 +40,7 @@ export function StudentHomeworkDetail({ homework, onBack, onSubmit }) {
   const submitLabel = homework.status === HOMEWORK_STATUS.NEEDS_REVISION ? 'Отправить исправленное решение' : homework.status === HOMEWORK_STATUS.OVERDUE ? 'Сдать после дедлайна' : 'Загрузить решение';
 
   async function submit() {
+    logger.ui('action=homework.submit.click screen=StudentHomework userRole=student', { homeworkId: homework.id });
     if (!file) {
       setError('Выберите реальный файл решения. Названия без файла недостаточно.');
       return;
@@ -46,7 +48,10 @@ export function StudentHomeworkDetail({ homework, onBack, onSubmit }) {
     try {
       setIsSaving(true);
       setError('');
-      await onSubmit(homework.id, { file, fileTitle: fileTitle.trim() || file.name });
+      const payload = { file, fileTitle: fileTitle.trim() || file.name };
+      logger.form('homework.submit.submit', { homeworkId: homework.id, fileTitle: payload.fileTitle, fileName: file.name, fileSize: file.size });
+      await onSubmit(homework.id, payload);
+      logger.nav('after homework.submit stay homeworkId=' + homework.id, { homeworkId: homework.id });
       setFile(null);
       setFileTitle('');
     } catch (err) {

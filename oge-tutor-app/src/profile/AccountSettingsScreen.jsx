@@ -7,6 +7,7 @@ import NotificationSettings from './NotificationSettings.jsx';
 import { normalizeProfile } from './profileOptions.js';
 import { Button, Card, Field, Header, Section } from '../shared/ui.jsx';
 import { validateEmail as validateEmailValue } from '../shared/validation.js';
+import { logger } from '../shared/logger.js';
 
 export default function AccountSettingsScreen({ profile, role, onBack, onSaveAccount, onSaveSecurity, onSaveNotifications }) {
   const normalized = normalizeProfile(profile, role);
@@ -25,6 +26,7 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
   }
 
   async function saveAccount() {
+    logger.ui('action=account.email.save.click screen=AccountSettings userRole=' + role);
     resetFeedback();
     const emailValidation = validateEmailValue(email);
     if (!emailValidation.ok) {
@@ -35,7 +37,9 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
 
     try {
       setIsSaving(true);
-      await onSaveAccount({ email: cleanEmail });
+      const payload = { email: cleanEmail };
+      logger.form('account.email.submit', payload);
+      await onSaveAccount(payload);
       setMessage('Email сохранён.');
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить email.');
@@ -45,6 +49,7 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
   }
 
   async function savePassword() {
+    logger.ui('action=account.password.save.click screen=AccountSettings userRole=' + role);
     resetFeedback();
 
     if (!currentPassword) {
@@ -62,7 +67,9 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
 
     try {
       setIsSaving(true);
-      await onSaveSecurity({ currentPassword, newPassword });
+      const payload = { currentPassword, newPassword };
+      logger.form('account.password.submit', payload);
+      await onSaveSecurity(payload);
       setCurrentPassword('');
       setNewPassword('');
       setRepeatPassword('');
@@ -75,11 +82,14 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
   }
 
   async function saveNotifications() {
+    logger.ui('action=account.notifications.save.click screen=AccountSettings userRole=' + role);
     resetFeedback();
 
     try {
       setIsSaving(true);
-      await onSaveNotifications({ notifications });
+      const payload = { notifications };
+      logger.form('account.notifications.submit', payload);
+      await onSaveNotifications(payload);
       setMessage('Уведомления сохранены.');
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить уведомления.');

@@ -9,6 +9,7 @@ import { selectHomework, selectStudent } from '../app/selectors.js';
 import { HOMEWORK_FILTERS } from '../shared/constants.js';
 import { dateInputValue, endOfLocalDayIso, formatDateLabel, formatDateTimeLabel, isPastIso } from '../shared/dateTime.js';
 import { formatMaterialCount, homeworkStatusHint, isHomeworkClosed, isHomeworkEditable, isHomeworkReviewable, isHomeworkWaitingStudent, parseTaskNumberInput, parseTaskNumbers } from '../shared/formatters.js';
+import { logger } from '../shared/logger.js';
 import { Badge, Button, Card, EmptyState, Field, Header, MaterialList, RowCard, Section, SelectField, TextArea, cx, iconByStatus, toneByStatus } from '../shared/ui.jsx';
 
 const getStudent = selectStudent;
@@ -80,6 +81,7 @@ export function CreateHomework({ data, actions, onBack }) {
   const [isSaving, setIsSaving] = useState(false);
 
   async function submit() {
+    logger.ui('action=homework.create.click screen=TeacherHomework userRole=teacher');
     const tasks = validateHomeworkTaskNumbers(form.taskNumbers);
     const due = validateHomeworkDueDate(form.dueDate);
 
@@ -103,14 +105,17 @@ export function CreateHomework({ data, actions, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.createHomework({
+      const payload = {
         studentId: form.studentId,
         title: form.title.trim(),
         taskNumbers: tasks.taskNumbers,
         dueAt: due.dueAt,
         description: form.description.trim(),
         materials: form.materials,
-      });
+      };
+      logger.form('homework.create.submit', payload);
+      const result = await actions.createHomework(payload);
+      logger.nav('after homework.create back to list', { homeworkId: result?.homework?.id, requestId: result?.requestId });
       onBack();
     } catch (err) {
       setError(err?.message || 'Не удалось выдать ДЗ.');
@@ -161,6 +166,7 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
   }
 
   async function saveEdit() {
+    logger.ui('action=homework.update.click screen=TeacherHomework userRole=teacher', { homeworkId: homework.id });
     const tasks = validateHomeworkTaskNumbers(form.taskNumbers);
     const due = validateHomeworkDueDate(form.dueDate);
 
@@ -188,14 +194,17 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
     try {
       setIsSaving(true);
       setError('');
-      await actions.updateHomework(homework.id, {
+      const payload = {
         studentId: form.studentId,
         title: form.title.trim(),
         taskNumbers: tasks.taskNumbers,
         dueAt: due.dueAt,
         description: form.description.trim(),
         materials: form.materials,
-      });
+      };
+      logger.form('homework.update.submit', { homeworkId: homework.id, ...payload });
+      await actions.updateHomework(homework.id, payload);
+      logger.nav('after homework.update view homeworkId=' + homework.id, { homeworkId: homework.id });
       setMode('view');
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить ДЗ.');
@@ -205,10 +214,14 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
   }
 
   async function applyReview(status) {
+    logger.ui('action=homework.review.click screen=TeacherHomework userRole=teacher', { homeworkId: homework.id, status });
     try {
       setIsSaving(true);
       setError('');
-      await actions.reviewHomework(homework.id, { status, comment, reviewMaterials });
+      const payload = { status, comment, reviewMaterials };
+      logger.form('homework.review.submit', { homeworkId: homework.id, ...payload });
+      const result = await actions.reviewHomework(homework.id, payload);
+      logger.nav('after homework.review back to list', { homeworkId: result?.homework?.id || homework.id, status, requestId: result?.requestId });
       onBack();
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить проверку.');

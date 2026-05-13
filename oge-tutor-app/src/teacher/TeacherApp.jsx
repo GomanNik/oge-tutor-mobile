@@ -93,7 +93,7 @@ export default function TeacherApp({ data, actions, onLogout }) {
         <StudentsList data={data} openStudent={openStudent} openCreate={() => openMode('create-student', TEACHER_ROUTE.STUDENTS)} />
       ) : null}
 
-      {screen === TEACHER_ROUTE.LESSONS && mode === 'create-lesson' ? <CreateLesson data={data} actions={actions} onBack={clearDetails} /> : null}
+      {screen === TEACHER_ROUTE.LESSONS && mode === 'create-lesson' ? <CreateLesson data={data} actions={actions} onBack={clearDetails} onCreated={openLesson} /> : null}
       {screen === TEACHER_ROUTE.LESSONS && lessonId ? <LessonDetail data={data} actions={actions} lessonId={lessonId} onBack={() => setLessonId(null)} /> : null}
       {screen === TEACHER_ROUTE.LESSONS && !mode && !lessonId ? <LessonsList data={data} openCreate={() => openMode('create-lesson', TEACHER_ROUTE.LESSONS)} openLesson={openLesson} /> : null}
 
