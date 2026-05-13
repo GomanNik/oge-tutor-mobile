@@ -1,0 +1,27 @@
+export const ROLE = { TEACHER: 'teacher', STUDENT: 'student' } as const;
+export const ACCESS_STATUS = { ACTIVE: 'active', INVITE_SENT: 'invite_sent', PASSWORD_PENDING: 'password_pending', DISABLED: 'disabled' } as const;
+export const STUDENT_ACCESS_ACTION = { RESEND_INVITE: 'resend_invite', RESET_PASSWORD: 'reset_password', DISABLE: 'disable', ENABLE: 'enable' } as const;
+export const LESSON_STATUS = { PLANNED: 'planned', RESCHEDULED: 'rescheduled', COMPLETED: 'completed', CANCELED: 'canceled' } as const;
+export const LESSON_SOURCE = { MANUAL: 'manual', TEMPLATE: 'template', IMPORT: 'import' } as const;
+export const HOMEWORK_STATUS = { ASSIGNED: 'assigned', SUBMITTED: 'submitted', NEEDS_REVISION: 'needs_revision', REVIEWED: 'reviewed', OVERDUE: 'overdue' } as const;
+export const HOMEWORK_REVIEW_ACTION = { APPROVE: 'approve', REQUEST_REVISION: 'request_revision' } as const;
+export const SUBMISSION_STATUS = { SUBMITTED: 'submitted', REVIEWED: 'reviewed', NEEDS_REVISION: 'needs_revision' } as const;
+export const MATERIAL_TYPE = { FILE: 'file', LINK: 'link', LIBRARY: 'library' } as const;
+export const MATERIAL_SOURCE = { UPLOAD: 'upload', LINK: 'link', LIBRARY: 'library' } as const;
+export const PROGRESS_COVERAGE_STATUS = { NOT_STARTED: 'not_started', IN_PROGRESS: 'in_progress', ASSESSMENT_NEEDED: 'assessment_needed', ASSESSED: 'assessed' } as const;
+export const PROGRESS_MASTERY_LEVEL = { WEAK: 'weak', MEDIUM: 'medium', GOOD: 'good', STRONG: 'strong' } as const;
+export const PROGRESS_SOURCE = { MANUAL: 'manual', LESSON_COMPLETED: 'lesson_completed', HOMEWORK_RESULT: 'homework_result', DIAGNOSTIC: 'diagnostic', IMPORT: 'import' } as const;
+export const NOTIFICATION_TYPE = { PROGRESS_ASSESSMENT_REQUIRED: 'progress_assessment_required' } as const;
+export const NOTIFICATION_STATUS = { UNREAD: 'unread', READ: 'read', RESOLVED: 'resolved' } as const;
+
+export type Role = typeof ROLE[keyof typeof ROLE];
+export type AccessStatus = typeof ACCESS_STATUS[keyof typeof ACCESS_STATUS];
+export type LessonStatus = typeof LESSON_STATUS[keyof typeof LESSON_STATUS];
+export type HomeworkStatus = typeof HOMEWORK_STATUS[keyof typeof HOMEWORK_STATUS];
+export type ProgressCoverageStatus = typeof PROGRESS_COVERAGE_STATUS[keyof typeof PROGRESS_COVERAGE_STATUS];
+export type ProgressMasteryLevel = typeof PROGRESS_MASTERY_LEVEL[keyof typeof PROGRESS_MASTERY_LEVEL];
+
+export const SCORE_FORMULA_VERSION = 'oge_math_v1';
+export const OGE_TASK_MIN = 1;
+export const OGE_TASK_MAX = 25;
+export const MAX_PRIMARY_SCORE = 31;

@@ -1,0 +1,246 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  passwordHash   String
+  role           String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  teacherProfile TeacherProfile?
+  studentProfile StudentProfile?
+  uploadedFiles  FileResource[]
+}
+
+model TeacherProfile {
+  id        String           @id @default(cuid())
+  userId    String           @unique
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  avatar    String           @default("")
+  bg        String           @default("")
+  settings  Json             @default("{}")
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  students  StudentProfile[]
+  lessons   Lesson[]
+  homeworks Homework[]
+  topics    MaterialTopic[]
+  notices   Notification[]
+}
+
+model StudentProfile {
+  id             String                @id @default(cuid())
+  userId         String                @unique
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teacherId      String
+  teacher        TeacherProfile        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  name           String
+  grade          String                @default("")
+  goal           String                @default("")
+  note           String                @default("")
+  avatar         String                @default("")
+  bg             String                @default("")
+  access         String                @default("password_pending")
+  settings       Json                  @default("{}")
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  lessons        Lesson[]
+  homeworks      Homework[]
+  progress       StudentTaskProgress[]
+  submissions    HomeworkSubmission[]
+  notifications  Notification[]
+
+  @@index([teacherId])
+}
+
+model Lesson {
+  id                String         @id @default(cuid())
+  teacherId         String
+  teacher           TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId         String
+  student           StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  topic             String
+  focusTaskNumbers  Int[]          @default([])
+  startAt           DateTime
+  endAt             DateTime
+  timezone          String
+  durationMinutes   Int
+  status            String         @default("planned")
+  source            String         @default("manual")
+  completedAt       DateTime?
+  completionComment String         @default("")
+  note              String         @default("")
+  materials         Json           @default("[]")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  progressEvents    ProgressHistory[]
+  notifications     Notification[]
+
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([startAt])
+}
+
+model Homework {
+  id              String               @id @default(cuid())
+  teacherId       String
+  teacher         TeacherProfile       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         StudentProfile       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title           String
+  description     String               @default("")
+  topic           String               @default("")
+  taskNumbers     Int[]                @default([])
+  dueAt           DateTime
+  assignedAt      DateTime             @default(now())
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  closedAt        DateTime?
+  status          String               @default("assigned")
+  materials       Json                 @default("[]")
+  reviewMaterials Json                 @default("[]")
+  solutionFile    String               @default("")
+  teacherComment  String               @default("")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  attempts        HomeworkSubmission[]
+
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([dueAt])
+}
+
+model HomeworkSubmission {
+  id             String         @id @default(cuid())
+  homeworkId     String
+  homework       Homework       @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  fileResourceId String
+  fileResource   FileResource   @relation(fields: [fileResourceId], references: [id], onDelete: Restrict)
+  reviewStatus   String         @default("submitted")
+  submittedAt    DateTime       @default(now())
+  reviewedAt     DateTime?
+  teacherComment String         @default("")
+
+  @@index([homeworkId])
+  @@index([studentId])
+}
+
+model FileResource {
+  id          String               @id @default(cuid())
+  ownerId     String?
+  owner       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  originalName String
+  mimeType    String
+  size        Int
+  url         String
+  storagePath String
+  uploadedAt DateTime             @default(now())
+  submissions HomeworkSubmission[]
+  attachments MaterialAttachment[]
+}
+
+model MaterialTopic {
+  id         String               @id @default(cuid())
+  teacherId  String
+  teacher    TeacherProfile       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  taskNumber Int
+  title      String
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  files      MaterialAttachment[]
+
+  @@unique([teacherId, taskNumber])
+  @@index([teacherId])
+}
+
+model MaterialAttachment {
+  id          String         @id @default(cuid())
+  topicId     String
+  topic       MaterialTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  type        String
+  source      String
+  title       String
+  url         String         @default("")
+  fileId      String?
+  file        FileResource?  @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  originalName String        @default("")
+  fileName    String         @default("")
+  mimeType    String         @default("")
+  size        Int            @default(0)
+  uploadedAt  DateTime?
+  createdAt   DateTime       @default(now())
+
+  @@index([topicId])
+}
+
+model StudentTaskProgress {
+  id                       String            @id @default(cuid())
+  studentId                String
+  student                  StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  taskNumber               Int
+  coverageStatus           String            @default("not_started")
+  masteryLevel             String?
+  lastAssessedMasteryLevel String?
+  lessonCount              Int               @default(0)
+  lastLessonId             String?
+  lastActivityAt           DateTime?
+  lastAssessedAt           DateTime?
+  source                   String            @default("manual")
+  teacherComment           String            @default("")
+  recommendedAction        String            @default("")
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  history                  ProgressHistory[]
+
+  @@unique([studentId, taskNumber])
+  @@index([studentId])
+}
+
+model ProgressHistory {
+  id             String              @id @default(cuid())
+  studentId      String
+  taskProgressId String?
+  taskProgress   StudentTaskProgress? @relation(fields: [taskProgressId], references: [id], onDelete: SetNull)
+  taskNumber     Int
+  lessonId       String?
+  lesson         Lesson?             @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  type           String
+  source         String
+  coverageStatus String
+  masteryLevel   String?
+  comment        String              @default("")
+  createdAt      DateTime            @default(now())
+
+  @@index([studentId])
+  @@index([taskProgressId])
+}
+
+model Notification {
+  id         String          @id @default(cuid())
+  type       String
+  status     String          @default("unread")
+  teacherId  String
+  teacher    TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId  String?
+  student    StudentProfile? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  taskNumber Int?
+  lessonId   String?
+  lesson     Lesson?         @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  title      String
+  message    String
+  createdAt  DateTime        @default(now())
+  resolvedAt DateTime?
+
+  @@index([teacherId])
+  @@index([studentId])
+}
