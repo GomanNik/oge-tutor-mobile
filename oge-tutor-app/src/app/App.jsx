@@ -10,7 +10,7 @@ import { useBackendStore } from './useBackendStore.js';
 import { Button, MobileFrame } from '../shared/ui.jsx';
 
 export default function App() {
-  const { resources, session, loading, busy, error, login, logout, requestPasswordReset, actions } = useBackendStore();
+  const { resources, session, loading, busy, error, login, logout, requestPasswordReset, verifyAccessToken, completeAccessToken, actions } = useBackendStore();
 
   return (
     <div className="app-page">
@@ -32,7 +32,13 @@ export default function App() {
         ) : null}
 
         {!loading && !error && !session ? (
-          <AuthFlow onLogin={login} onPasswordReset={requestPasswordReset} busy={busy} />
+          <AuthFlow
+            onLogin={login}
+            onPasswordReset={requestPasswordReset}
+            onVerifyAccessToken={verifyAccessToken}
+            onCompleteAccessToken={completeAccessToken}
+            busy={busy}
+          />
         ) : null}
 
         {!loading && session?.role === 'student' && resources ? (

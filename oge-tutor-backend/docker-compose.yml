@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oge-tutor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: oge_tutor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - oge_tutor_pg:/var/lib/postgresql/data
+volumes:
+  oge_tutor_pg:

@@ -240,6 +240,8 @@ export function useBackendStore() {
     login: (email, password) => run(() => api.login({ email, password }), { globalError: false }),
     logout: () => run(() => api.logout()),
     requestPasswordReset: (email) => run(() => api.requestPasswordReset({ email }), { globalError: false }),
+    verifyAccessToken: (token) => run(() => api.verifyAccessToken({ token }), { globalError: false }),
+    completeAccessToken: (token, password) => run(() => api.completeAccessToken({ token, password }), { globalError: false }),
     actions,
   };
 }

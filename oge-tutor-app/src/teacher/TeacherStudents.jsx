@@ -79,7 +79,7 @@ export function CreateStudent({ actions, onBack }) {
 
   return (
     <>
-      <Header title="Добавить ученика" subtitle="После создания аккаунта backend отправляет ученику письмо для установки пароля." onBack={onBack} />
+      <Header title="Добавить ученика" subtitle="После создания аккаунта backend подготовит ссылку установки пароля." onBack={onBack} />
       <Card className="form-stack">
         {error ? <div className="inline-error">{error}</div> : null}
         <Field label="Имя ученика" value={form.name} onChange={(name) => setForm({ ...form, name })} placeholder="Иван Петров" />
@@ -87,8 +87,8 @@ export function CreateStudent({ actions, onBack }) {
         <Field label="Класс" value={form.grade} onChange={(grade) => setForm({ ...form, grade })} placeholder="Например: 9 класс" />
         <Field label="Цель" value={form.goal} onChange={(goal) => setForm({ ...form, goal })} placeholder="Например: ОГЭ на 4" />
         <TextArea label="Комментарий" value={form.note} onChange={(note) => setForm({ ...form, note })} placeholder="Что важно помнить по ученику" />
-        <div className="card card-amber-soft">Публичной регистрации нет: преподаватель создаёт аккаунт, а ученик задаёт пароль по ссылке из письма.</div>
-        <Button onClick={submit} disabled={!form.name.trim() || !form.email.trim() || isSaving}>{isSaving ? 'Создаём…' : 'Создать и отправить письмо'}</Button>
+        <div className="card card-amber-soft">Публичной регистрации нет: преподаватель создаёт аккаунт, а backend готовит ссылку для установки пароля.</div>
+        <Button onClick={submit} disabled={!form.name.trim() || !form.email.trim() || isSaving}>{isSaving ? 'Создаём…' : 'Создать доступ'}</Button>
       </Card>
     </>
   );
@@ -197,7 +197,7 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
             </div>
             {accessMessage ? <div className="inline-note success">{accessMessage}</div> : null}
             {accessError ? <div className="inline-error">{accessError}</div> : null}
-            <Button variant="light" onClick={() => runAccessAction(actions.resendStudentInvite, 'Письмо повторно отправлено.')}>Отправить письмо повторно</Button>
+            <Button variant="light" onClick={() => runAccessAction(actions.resendStudentInvite, 'Ссылка приглашения обновлена.')}>Обновить приглашение</Button>
             <Button variant="soft" onClick={() => runAccessAction(actions.resetStudentPassword, 'Ссылка установки пароля обновлена.')}>Сбросить ссылку установки пароля</Button>
             <Button variant="danger" onClick={() => runAccessAction(actions.disableStudentAccess, 'Доступ ученика отключён.')}>Отключить доступ</Button>
           </Card>

@@ -3,6 +3,7 @@
  * These components keep the app visually consistent and mobile-like.
  */
 import React from 'react';
+import { getStoredApiToken } from '../api/authToken.js';
 import { STUDENT_ROUTE_LABELS, TEACHER_ROUTE_LABELS, statusIcon, statusLabel, statusTone } from '../api/contracts.js';
 import { getAvatarIcon } from './avatarCatalog.js';
 import { materialDisplayTitle, materialIcon, materialSourceText } from './formatters.js';
@@ -184,6 +185,20 @@ export function RowCard({ icon, iconTone = 'blue', title, subtitle, badge, badge
 
 export function MaterialList({ items = [], onRemove, compact = false }) {
   if (!items.length) return <div className="empty-materials">Материалы пока не прикреплены.</div>;
+
+  async function openMaterial(event, item) {
+    const url = item?.url || '';
+    if (!/\/files\/[^/]+\/download(?:$|\?)/.test(url)) return;
+    event.preventDefault();
+    const token = getStoredApiToken();
+    const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    window.open(objectUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  }
+
   return (
     <div className={cx('material-preview-list', compact && 'compact')}>
       {items.map((item, index) => (
@@ -196,7 +211,7 @@ export function MaterialList({ items = [], onRemove, compact = false }) {
           {onRemove ? (
             <button type="button" className="material-remove-btn" onClick={() => onRemove(index)}>Убрать</button>
           ) : item.url ? (
-            <a className="material-open-btn" href={item.url} target="_blank" rel="noreferrer">Открыть</a>
+            <a className="material-open-btn" href={item.url} target="_blank" rel="noreferrer" onClick={(event) => openMaterial(event, item)}>Открыть</a>
           ) : null}
         </div>
       ))}

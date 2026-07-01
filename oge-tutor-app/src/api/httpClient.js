@@ -3,9 +3,8 @@
  * Set VITE_API_BASE_URL to use the real backend instead of the mock adapter.
  */
 import { ApiError } from './apiError.js';
+import { API_TOKEN_KEY, getStoredApiToken } from './authToken.js';
 import { mapApiErrorPayload, mapBackendResultDto, mapFileResourceDto } from './dto.js';
-
-const TOKEN_KEY = 'oge-tutor-api-token';
 
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
@@ -40,13 +39,13 @@ function stripRuntimeFiles(value) {
 
 export function createHttpBackend(baseUrl) {
   const root = normalizeBaseUrl(baseUrl);
-  let token = typeof window !== 'undefined' ? window.sessionStorage.getItem(TOKEN_KEY) : '';
+  let token = getStoredApiToken();
 
   function persistToken(nextToken) {
     token = nextToken || '';
     if (typeof window === 'undefined') return;
-    if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
-    else window.sessionStorage.removeItem(TOKEN_KEY);
+    if (token) window.sessionStorage.setItem(API_TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(API_TOKEN_KEY);
   }
 
   async function request(path, options = {}) {
@@ -181,6 +180,8 @@ export function createHttpBackend(baseUrl) {
       return result || { session: null };
     },
     requestPasswordReset: (payload) => request('/auth/password-reset', { method: 'POST', body: payload }),
+    verifyAccessToken: (payload) => request('/auth/access-token/verify', { method: 'POST', body: payload }),
+    completeAccessToken: (payload) => request('/auth/access-token/complete', { method: 'POST', body: payload }),
 
     updateTeacherProfile: (patch) => request('/teacher/profile', { method: 'PATCH', body: patch }),
     updateTeacherAccount: (payload) => request('/teacher/account', { method: 'PATCH', body: payload }),

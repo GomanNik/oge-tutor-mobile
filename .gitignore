@@ -13,3 +13,5 @@ dist/
 **/.idea/
 **/.vite/
 **/coverage/
+**/uploads/
+oge-tutor-backend.__before_restore_*/

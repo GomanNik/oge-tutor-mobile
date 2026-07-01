@@ -681,6 +681,17 @@ export function createMockBackend() {
       return { ok: true };
     },
 
+    async verifyAccessToken({ token }) {
+      if (!normalizeText(token)) throw apiError('Ссылка недействительна.', 'validation_error', 422, { fieldErrors: { token: 'invalid' } });
+      return { valid: true, type: 'password_reset', account: { email: 'd***o@example.test', name: 'Demo' } };
+    },
+
+    async completeAccessToken({ token, password }) {
+      if (!normalizeText(token)) throw apiError('Ссылка недействительна.', 'validation_error', 422, { fieldErrors: { token: 'invalid' } });
+      if (!password || String(password).length < 6) throw apiError('Пароль должен быть не короче 6 символов.', 'validation_error', 422, { fieldErrors: { password: 'min_length_6' } });
+      return { ok: true };
+    },
+
     updateTeacherProfile(patch) {
       return mutate((db, session) => {
         requireTeacherSession(session);
