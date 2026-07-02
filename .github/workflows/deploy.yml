@@ -248,3 +248,4 @@ jobs:
         shell: bash
         run: |
           curl --fail --silent --show-error "$PUBLIC_BACKEND_URL/health"
+          curl --fail --silent --show-error "$PUBLIC_BACKEND_URL/health/ready"

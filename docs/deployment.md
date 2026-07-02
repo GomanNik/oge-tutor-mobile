@@ -66,6 +66,7 @@ It finishes by checking:
 
 ```bash
 curl --fail "$PUBLIC_BACKEND_URL/health"
+curl --fail "$PUBLIC_BACKEND_URL/health/ready"
 ```
 
 ### Required GitHub Secrets
