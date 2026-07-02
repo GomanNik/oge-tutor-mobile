@@ -2,7 +2,7 @@
  * OGE Tutor App — authentication flow.
  * Auth is handled through API actions; the screen has no hardcoded users or passwords.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getErrorMessage } from '../api/apiError.js';
 import { Button, Field } from '../shared/ui.jsx';
 
@@ -32,14 +32,11 @@ export default function AuthFlow({ onLogin, onPasswordReset, onVerifyAccessToken
   const [accessInfo, setAccessInfo] = useState(null);
   const [checkingToken, setCheckingToken] = useState(Boolean(initialToken));
   const [error, setError] = useState('');
-  const verifiedTokenRef = useRef('');
 
   useEffect(() => {
     let alive = true;
     async function verifyToken() {
       if (!accessToken || mode !== 'setup') return;
-      if (verifiedTokenRef.current === accessToken) return;
-      verifiedTokenRef.current = accessToken;
       setCheckingToken(true);
       setError('');
       try {

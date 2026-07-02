@@ -383,11 +383,10 @@ export function mapDataDto(dto) {
 
 export function mapBackendResultDto(dto) {
   if (!isRecord(dto)) return {};
-  return {
-    ...dto,
-    data: dto.data === undefined ? undefined : mapDataDto(dto.data),
-    session: dto.session === undefined ? undefined : mapSessionDto(dto.session),
-  };
+  const result = { ...dto };
+  if (dto.data !== undefined) result.data = mapDataDto(dto.data);
+  if (dto.session !== undefined) result.session = mapSessionDto(dto.session);
+  return result;
 }
 
 export function mapApiErrorPayload(payload, status = 0, fallbackMessage = 'Backend вернул ошибку.') {

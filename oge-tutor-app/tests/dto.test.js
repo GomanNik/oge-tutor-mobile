@@ -42,4 +42,21 @@ describe('api dto mappers', () => {
     expect(result.data.lessons).toHaveLength(1);
     expect(result.data.homeworks).toHaveLength(1);
   });
+
+  it('does not synthesize an empty session for mutation responses without session', () => {
+    const result = mapBackendResultDto({
+      data: {
+        teacher: { id: 't-1', name: 'Teacher', email: 'teacher@example.com', settings: {} },
+        students: [],
+        lessons: [],
+        homeworks: [],
+        materials: [],
+        notifications: [],
+      },
+      invite: { token: 'dev-preview-token' },
+    });
+
+    expect(Object.prototype.hasOwnProperty.call(result, 'session')).toBe(false);
+    expect(result.invite.token).toBe('dev-preview-token');
+  });
 });

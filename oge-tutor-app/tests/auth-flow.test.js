@@ -48,6 +48,40 @@ describe('AuthFlow', () => {
     expect(screen.getByText(/активировать доступ ученика/)).toBeTruthy();
   });
 
+  it('does not leave token setup disabled after a parent rerender', async () => {
+    window.history.pushState(null, '', '/setup-password?token=invite-token');
+    let resolveVerify;
+    const verifyPromise = new Promise((resolve) => { resolveVerify = resolve; });
+    const firstVerify = vi.fn(() => verifyPromise);
+    const secondVerify = vi.fn(async () => ({
+      valid: true,
+      type: 'invite',
+      account: { email: 's*****t@mail.ru', name: 'Student Name' },
+    }));
+
+    const view = renderAuthFlow({
+      onLogin: vi.fn(),
+      onPasswordReset: vi.fn(),
+      onVerifyAccessToken: firstVerify,
+      onCompleteAccessToken: vi.fn(),
+    });
+    view.rerender(React.createElement(AuthFlow, {
+      onLogin: vi.fn(),
+      onPasswordReset: vi.fn(),
+      onVerifyAccessToken: secondVerify,
+      onCompleteAccessToken: vi.fn(),
+    }));
+
+    resolveVerify({
+      valid: true,
+      type: 'invite',
+      account: { email: 's*****t@mail.ru', name: 'Student Name' },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('Новый пароль').disabled).toBe(false));
+    expect(screen.getByText(/активировать доступ ученика/)).toBeTruthy();
+  });
+
   it('completes token setup and shows login prompt', async () => {
     window.history.pushState(null, '', '/reset-password?token=reset-token');
     const onCompleteAccessToken = vi.fn(async () => ({ ok: true }));

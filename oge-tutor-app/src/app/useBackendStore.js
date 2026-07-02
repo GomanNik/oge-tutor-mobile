@@ -231,17 +231,21 @@ export function useBackendStore() {
     removeMaterialFile: (topicId, fileId) => run(() => api.removeMaterialFile(topicId, fileId)),
   }), [api, run]);
 
+  const authActions = useMemo(() => ({
+    login: (email, password) => run(() => api.login({ email, password }), { globalError: false }),
+    logout: () => run(() => api.logout()),
+    requestPasswordReset: (email) => run(() => api.requestPasswordReset({ email }), { globalError: false }),
+    verifyAccessToken: (token) => run(() => api.verifyAccessToken({ token }), { globalError: false }),
+    completeAccessToken: (token, password) => run(() => api.completeAccessToken({ token, password }), { globalError: false }),
+  }), [api, run]);
+
   return {
     resources: session ? resources : null,
     session,
     loading,
     busy,
     error,
-    login: (email, password) => run(() => api.login({ email, password }), { globalError: false }),
-    logout: () => run(() => api.logout()),
-    requestPasswordReset: (email) => run(() => api.requestPasswordReset({ email }), { globalError: false }),
-    verifyAccessToken: (token) => run(() => api.verifyAccessToken({ token }), { globalError: false }),
-    completeAccessToken: (token, password) => run(() => api.completeAccessToken({ token, password }), { globalError: false }),
+    ...authActions,
     actions,
   };
 }
