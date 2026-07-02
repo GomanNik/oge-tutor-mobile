@@ -1,12 +1,12 @@
-name: Manual Deploy Scaffold
+name: Manual VPS Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: "Deployment target. Keep 'template' until a real platform is configured."
+      confirm:
+        description: "Type deploy-vps to run the VPS deployment after quality checks."
         required: true
-        default: "template"
+        default: "dry-run"
 
 permissions:
   contents: read
@@ -47,20 +47,6 @@ jobs:
 
       - name: Run quality gate
         run: pnpm run quality
-
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: quality
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build backend image
-        run: docker build -f oge-tutor-backend/Dockerfile -t oge-tutor-backend:manual .
-
-      - name: Build frontend image
-        run: docker build -f oge-tutor-app/Dockerfile --build-arg VITE_API_BASE_URL=${{ env.VITE_API_BASE_URL }} -t oge-tutor-frontend:manual .
 
   e2e:
     name: AppModule E2E
@@ -116,58 +102,149 @@ jobs:
       - name: Run AppModule e2e tests
         run: pnpm --dir oge-tutor-backend run test:e2e
 
-  deploy-vps-template:
-    name: Deploy VPS Template
+  docker-build:
+    name: Docker Build
     runs-on: ubuntu-latest
-    needs: [quality, e2e, docker-build]
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      PUBLIC_BACKEND_URL: ${{ secrets.PUBLIC_BACKEND_URL }}
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      FRONTEND_DEPLOY_TOKEN: ${{ secrets.FRONTEND_DEPLOY_TOKEN }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+    needs: quality
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show manual deployment scaffold
-        if: ${{ inputs.target == 'template' }}
-        run: |
-          echo "Manual deployment scaffold is ready."
-          echo "No production deployment was attempted."
-          echo "Set target=vps only after DEPLOY_* and runtime secrets are configured."
-          echo "Adapt the template steps for VPS, Render, Railway, Vercel or the chosen platform."
+      - name: Build backend image
+        run: docker build -f oge-tutor-backend/Dockerfile -t oge-tutor-backend:manual .
 
-      - name: Validate VPS secrets
-        if: ${{ inputs.target == 'vps' }}
+      - name: Build frontend image
+        run: docker build -f oge-tutor-app/Dockerfile --build-arg VITE_API_BASE_URL=${{ env.VITE_API_BASE_URL }} -t oge-tutor-frontend:manual .
+
+  deploy-vps:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [quality, e2e, docker-build]
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      PUBLIC_BACKEND_URL: ${{ secrets.PUBLIC_BACKEND_URL }}
+      APP_FRONTEND_URL: ${{ secrets.APP_FRONTEND_URL }}
+      FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+    steps:
+      - name: Stop dry run before deployment
+        if: ${{ inputs.confirm != 'deploy-vps' }}
+        run: |
+          echo "::error::Manual VPS deployment was not confirmed."
+          echo "Re-run this workflow with confirm=deploy-vps after VPS secrets are configured."
+          exit 1
+
+      - name: Validate required secrets
         shell: bash
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DATABASE_URL JWT_SECRET PUBLIC_BACKEND_URL SMTP_HOST SMTP_USER SMTP_PASS; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DATABASE_URL JWT_SECRET PUBLIC_BACKEND_URL APP_FRONTEND_URL FRONTEND_ORIGIN SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM; do
             if [ -z "${!name}" ]; then
-              echo "::error::$name secret is required for target=vps"
+              echo "::error::$name secret is required for VPS deployment"
               missing=1
             fi
           done
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "::warning::POSTGRES_PASSWORD secret is empty. This is acceptable only when DATABASE_URL points to an external managed database."
+          fi
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
 
-      - name: Stop before target-specific deployment
-        if: ${{ inputs.target == 'vps' }}
-        run: |
-          echo "::error::VPS deployment commands are intentionally not enabled yet."
-          echo "Add SSH known_hosts handling, image transfer/pull strategy and server docker compose commands for the selected VPS."
-          exit 1
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Refuse unknown deployment target
-        if: ${{ inputs.target != 'template' && inputs.target != 'vps' }}
+      - name: Prepare SSH
+        shell: bash
         run: |
-          echo "::error::Deployment target '${{ inputs.target }}' is not implemented."
-          exit 1
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync project to VPS
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude '**/node_modules/' \
+            --exclude 'dist/' \
+            --exclude '**/dist/' \
+            --exclude 'uploads/' \
+            --exclude '**/uploads/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude '.idea/' \
+            --exclude 'oge-tutor-backend.__before_restore_*/' \
+            --exclude 'backups/' \
+            --exclude '*.dump' \
+            --exclude '*.sql' \
+            --exclude '*.log' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Write production environment on VPS
+        shell: bash
+        run: |
+          quote_env() {
+            python3 -c 'import shlex, sys; sys.stdout.write(shlex.quote(sys.argv[1]))' "$1"
+          }
+          write_env() {
+            local name="$1"
+            local value="$2"
+            printf '%s=' "$name"
+            quote_env "$value"
+            printf '\n'
+          }
+          {
+            write_env NODE_ENV production
+            write_env POSTGRES_DB "${POSTGRES_DB:-oge_tutor}"
+            write_env POSTGRES_USER "${POSTGRES_USER:-postgres}"
+            write_env POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
+            write_env DATABASE_URL "${DATABASE_URL}"
+            write_env JWT_SECRET "${JWT_SECRET}"
+            write_env JWT_EXPIRES_IN "7d"
+            write_env BACKEND_PORT "3000"
+            write_env FRONTEND_PORT "8080"
+            write_env PUBLIC_BACKEND_URL "${PUBLIC_BACKEND_URL}"
+            write_env APP_FRONTEND_URL "${APP_FRONTEND_URL}"
+            write_env FRONTEND_ORIGIN "${FRONTEND_ORIGIN}"
+            write_env VITE_API_BASE_URL "${PUBLIC_BACKEND_URL}"
+            write_env UPLOAD_DIR "uploads"
+            write_env MAX_UPLOAD_BYTES "15728640"
+            write_env MAILER_PROVIDER "smtp"
+            write_env SMTP_HOST "${SMTP_HOST}"
+            write_env SMTP_PORT "${SMTP_PORT}"
+            write_env SMTP_SECURE "${SMTP_SECURE:-false}"
+            write_env SMTP_USER "${SMTP_USER}"
+            write_env SMTP_PASS "${SMTP_PASS}"
+            write_env SMTP_FROM "${SMTP_FROM}"
+          } > /tmp/oge-tutor.env
+          scp -i ~/.ssh/deploy_key /tmp/oge-tutor.env "$DEPLOY_USER@$DEPLOY_HOST:/tmp/oge-tutor.env"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mv /tmp/oge-tutor.env '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env'"
+          rm -f /tmp/oge-tutor.env
+
+      - name: Build and restart Compose services
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose config >/dev/null && docker compose up -d --build && docker compose ps"
+
+      - name: Verify backend health endpoint
+        shell: bash
+        run: |
+          curl --fail --silent --show-error "$PUBLIC_BACKEND_URL/health"

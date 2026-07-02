@@ -1,6 +1,15 @@
 import { ConfigService } from '@nestjs/config';
 
 const DEV_JWT_SECRET = 'dev-secret-change-me';
+type JwtDurationUnit =
+  | 'ms' | 's' | 'm' | 'h' | 'd' | 'w' | 'y'
+  | 'Msec' | 'Msecs' | 'Millisecond' | 'Milliseconds'
+  | 'Sec' | 'Secs' | 'Second' | 'Seconds'
+  | 'Min' | 'Mins' | 'Minute' | 'Minutes'
+  | 'Hr' | 'Hrs' | 'Hour' | 'Hours'
+  | 'Day' | 'Days' | 'Week' | 'Weeks'
+  | 'Yr' | 'Yrs' | 'Year' | 'Years';
+type JwtExpiresIn = number | `${number}` | `${number}${JwtDurationUnit}` | `${number} ${JwtDurationUnit}`;
 
 export function isProduction(config: ConfigService): boolean {
   return config.get<string>('NODE_ENV') === 'production';
@@ -15,6 +24,10 @@ export function getJwtSecret(config: ConfigService): string {
   return DEV_JWT_SECRET;
 }
 
-export function getJwtExpiresIn(config: ConfigService): string {
-  return config.get<string>('JWT_EXPIRES_IN') || '7d';
+export function getJwtExpiresIn(config: ConfigService): JwtExpiresIn {
+  const configured = config.get<string | number>('JWT_EXPIRES_IN') || '7d';
+  if (typeof configured === 'number') return configured;
+  const seconds = Number(configured);
+  if (Number.isInteger(seconds) && seconds > 0) return seconds;
+  return configured as JwtExpiresIn;
 }

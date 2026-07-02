@@ -67,3 +67,40 @@ For a production-like Compose run, replace all placeholder secrets and use SMTP 
 NODE_ENV=production
 MAILER_PROVIDER=smtp
 ```
+
+## GitHub Secrets for Manual VPS Deploy
+
+Required:
+
+```text
+DEPLOY_HOST
+DEPLOY_USER
+DEPLOY_SSH_KEY
+DEPLOY_PATH
+DATABASE_URL
+JWT_SECRET
+PUBLIC_BACKEND_URL
+APP_FRONTEND_URL
+FRONTEND_ORIGIN
+SMTP_HOST
+SMTP_PORT
+SMTP_USER
+SMTP_PASS
+SMTP_FROM
+```
+
+Recommended when using the bundled PostgreSQL container:
+
+```text
+POSTGRES_DB
+POSTGRES_USER
+POSTGRES_PASSWORD
+```
+
+Optional:
+
+```text
+SMTP_SECURE
+```
+
+`DATABASE_URL` must match the actual database used by Compose or the managed database provider. Do not put secret values in workflow files or docs.

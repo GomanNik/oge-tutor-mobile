@@ -2,7 +2,7 @@
 
 This repository uses pnpm as the only package manager for the frontend and backend.
 
-## Local install
+## Local Install
 
 From the repository root:
 
@@ -18,7 +18,7 @@ pnpm-lock.yaml
 
 Do not add per-package npm or pnpm lockfiles unless the workspace strategy changes.
 
-## Local quality gate
+## Local Quality Gate
 
 Run the full gate from the repository root:
 
@@ -50,15 +50,16 @@ pnpm --dir oge-tutor-backend run test:e2e
 
 Without `E2E_DATABASE_URL`, the local e2e command skips safely and CI remains the source of truth for the database-backed e2e run.
 
-## Prisma migration check
+## Prisma Migration Check
 
 With Docker running:
 
 ```powershell
-cd "C:\Users\Goman Nikita\Downloads\oge-tutor-app-v2\oge-tutor-backend"
-docker compose up -d
+cd "C:\Users\Goman Nikita\Downloads\oge-tutor-app-v2"
+docker compose up -d postgres
+cd .\oge-tutor-backend
 pnpm exec prisma migrate status
-pnpm exec prisma migrate dev
+pnpm exec prisma migrate deploy
 pnpm run prisma:generate
 ```
 
@@ -82,33 +83,21 @@ Jobs:
 - `prisma-db-check`: clean PostgreSQL service, migration deploy, migration status.
 - `e2e`: clean PostgreSQL service, migration deploy, AppModule HTTP e2e tests.
 - `docker-build`: backend and frontend Docker image builds.
-- `audit`: workspace dependency audit. It is non-blocking while planned major upgrades are still pending.
+- `audit`: workspace dependency audit with `--audit-level moderate`. It is blocking now that the Nest 11 upgrade removed the previous known advisories.
 
-## Manual deployment scaffold
+## Manual VPS Deployment
 
 `.github/workflows/deploy.yml` runs only via `workflow_dispatch`.
 
-It runs the quality gate, AppModule e2e tests and Docker builds first. The deploy job is a scaffold and does not attempt a production deploy until a real hosting target is selected.
-
-Expected future secret names:
+It runs the quality gate, AppModule e2e tests and Docker builds first. A real VPS deploy starts only when the workflow input is:
 
 ```text
-DATABASE_URL
-JWT_SECRET
-PUBLIC_BACKEND_URL
-DEPLOY_HOST
-DEPLOY_USER
-DEPLOY_SSH_KEY
-DEPLOY_PATH
-FRONTEND_DEPLOY_TOKEN
-SMTP_HOST
-SMTP_USER
-SMTP_PASS
+confirm=deploy-vps
 ```
 
-Do not put secret values in the repository.
+If required secrets are missing, the deploy job fails before any server changes. See [deployment.md](deployment.md) for the secret list and server requirements.
 
-## Do not commit
+## Do Not Commit
 
 ```text
 .env
