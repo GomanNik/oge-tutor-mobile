@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
-import { LESSON_SOURCE, LESSON_STATUS, NOTIFICATION_STATUS, NOTIFICATION_TYPE, PROGRESS_COVERAGE_STATUS, PROGRESS_SOURCE, ROLE } from '../common/contracts';
+import { LESSON_SOURCE, LESSON_STATUS, LessonSource, LessonStatus, NOTIFICATION_STATUS, NOTIFICATION_TYPE, PROGRESS_COVERAGE_STATUS, PROGRESS_SOURCE, ROLE } from '../common/contracts';
 import { conflict, forbidden, notFound, validationError } from '../common/app-error';
 import { assertFutureDate, assertLessonInterval, cleanText, parseIsoDate, parseOptionalTaskNumbers, requireText } from '../common/validation';
 import { FilesService } from '../files/files.service';
 
-const ACTIVE_LESSON_STATUSES = [LESSON_STATUS.PLANNED, LESSON_STATUS.RESCHEDULED];
+const ACTIVE_LESSON_STATUSES: LessonStatus[] = [LESSON_STATUS.PLANNED, LESSON_STATUS.RESCHEDULED];
 
 @Injectable()
 export class LessonsService {
@@ -42,10 +42,10 @@ export class LessonsService {
     if (conflictLesson) throw conflict('У ученика уже есть занятие в это время.', { startAt: 'lesson_conflict' });
   }
 
-  private parseLessonSource(value: unknown) {
+  private parseLessonSource(value: unknown): LessonSource {
     const source = cleanText(value) || LESSON_SOURCE.MANUAL;
     if (!Object.values(LESSON_SOURCE).includes(source as any)) throw validationError('Некорректный источник урока.', { source: 'invalid' });
-    return source;
+    return source as LessonSource;
   }
 
   async create(user: AuthUser, payload: any) {
@@ -110,7 +110,7 @@ export class LessonsService {
         endAt,
         timezone: patch.timezone !== undefined ? cleanText(patch.timezone) || 'Europe/Moscow' : undefined,
         durationMinutes,
-        status: status || undefined,
+        status: (status as LessonStatus | undefined) || undefined,
         source,
         note: patch.note !== undefined ? cleanText(patch.note) : undefined,
         materials,

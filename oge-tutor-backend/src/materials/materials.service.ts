@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
-import { MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../common/contracts';
+import { FILE_SCOPE, MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../common/contracts';
 import { forbidden, notFound, validationError } from '../common/app-error';
 import { cleanText, parseTaskNumbers, requireText } from '../common/validation';
 import { FilesService } from '../files/files.service';
@@ -38,7 +38,8 @@ export class MaterialsService {
 
     if (type === MATERIAL_TYPE.FILE) {
       const fileId = requireText(payload.fileId || item.fileId, 'fileId');
-      const file = await this.files.requireAccessibleFile(user, fileId);
+      const file = await this.files.requireAttachableFile(user, fileId);
+      await this.files.markFileScope(file.id, FILE_SCOPE.TEACHER_MATERIAL);
       return this.prisma.materialAttachment.create({
         data: {
           topicId: topic.id,

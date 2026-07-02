@@ -7,6 +7,7 @@ export const LESSON_SOURCE = { MANUAL: 'manual', TEMPLATE: 'template', IMPORT: '
 export const HOMEWORK_STATUS = { ASSIGNED: 'assigned', SUBMITTED: 'submitted', NEEDS_REVISION: 'needs_revision', REVIEWED: 'reviewed', OVERDUE: 'overdue' } as const;
 export const HOMEWORK_REVIEW_ACTION = { APPROVE: 'approve', REQUEST_REVISION: 'request_revision' } as const;
 export const SUBMISSION_STATUS = { SUBMITTED: 'submitted', REVIEWED: 'reviewed', NEEDS_REVISION: 'needs_revision' } as const;
+export const FILE_SCOPE = { PRIVATE_UPLOAD: 'private_upload', PRIVATE_SUBMISSION: 'private_submission', TEACHER_MATERIAL: 'teacher_material', SHARED_MATERIAL: 'shared_material' } as const;
 export const MATERIAL_TYPE = { FILE: 'file', LINK: 'link', LIBRARY: 'library' } as const;
 export const MATERIAL_SOURCE = { UPLOAD: 'upload', LINK: 'link', LIBRARY: 'library' } as const;
 export const PROGRESS_COVERAGE_STATUS = { NOT_STARTED: 'not_started', IN_PROGRESS: 'in_progress', ASSESSMENT_NEEDED: 'assessment_needed', ASSESSED: 'assessed' } as const;
@@ -19,7 +20,9 @@ export type Role = typeof ROLE[keyof typeof ROLE];
 export type AccessStatus = typeof ACCESS_STATUS[keyof typeof ACCESS_STATUS];
 export type AccessTokenType = typeof ACCESS_TOKEN_TYPE[keyof typeof ACCESS_TOKEN_TYPE];
 export type LessonStatus = typeof LESSON_STATUS[keyof typeof LESSON_STATUS];
+export type LessonSource = typeof LESSON_SOURCE[keyof typeof LESSON_SOURCE];
 export type HomeworkStatus = typeof HOMEWORK_STATUS[keyof typeof HOMEWORK_STATUS];
+export type FileScope = typeof FILE_SCOPE[keyof typeof FILE_SCOPE];
 export type ProgressCoverageStatus = typeof PROGRESS_COVERAGE_STATUS[keyof typeof PROGRESS_COVERAGE_STATUS];
 export type ProgressMasteryLevel = typeof PROGRESS_MASTERY_LEVEL[keyof typeof PROGRESS_MASTERY_LEVEL];
 

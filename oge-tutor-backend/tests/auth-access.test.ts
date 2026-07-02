@@ -166,6 +166,57 @@ describe('invite and reset tokens', () => {
     expect(mailer.sendAccessTokenLink).toHaveBeenCalledWith({ email: 'new@mail.ru', type: ACCESS_TOKEN_TYPE.INVITE, preview: { token: 'dev-token' } });
   });
 
+  it('stores teacher note on create and update, but blocks student editing that note', async () => {
+    let createdProfile: any;
+    const tx = {
+      user: {
+        create: vi.fn(async ({ data }) => ({ id: 'u-new', ...data })),
+      },
+      studentProfile: {
+        create: vi.fn(async ({ data }) => {
+          createdProfile = data;
+          return { id: 's-new', ...data };
+        }),
+      },
+    };
+    const prisma = {
+      user: { findUnique: vi.fn(async () => null) },
+      studentProfile: {
+        findFirst: vi.fn(async () => ({ id: 's-new', userId: 'u-new', teacherId: 't-1', user: { passwordHash: 'hash' } })),
+        findUnique: vi.fn(async () => ({ id: 's-new', userId: 'u-new', teacherId: 't-1', user: { passwordHash: 'hash' } })),
+        update: vi.fn(async ({ data }) => ({ id: 's-new', ...data })),
+      },
+      $transaction: vi.fn(async (callback) => callback(tx)),
+    };
+    const service = new StudentsService(
+      prisma as any,
+      { createForUser: vi.fn(async () => ({ id: 'invite-1', preview: undefined })) } as any,
+      { sendAccessTokenLink: vi.fn() } as any,
+    );
+
+    await service.create(
+      { role: ROLE.TEACHER, teacherId: 't-1', id: 'u-teacher', email: 'teacher@mail.ru' },
+      { email: 'new@mail.ru', name: 'Новый ученик', note: 'Работать над геометрией' },
+    );
+    expect(createdProfile.note).toBe('Работать над геометрией');
+
+    await service.updateProfile(
+      { role: ROLE.TEACHER, teacherId: 't-1', id: 'u-teacher', email: 'teacher@mail.ru' },
+      's-new',
+      { name: 'Новый ученик', note: 'Новая заметка' },
+    );
+    expect(prisma.studentProfile.update).toHaveBeenLastCalledWith({
+      where: { id: 's-new' },
+      data: { name: 'Новый ученик', grade: '', goal: '', avatar: '', bg: '', note: 'Новая заметка' },
+    });
+
+    await expect(service.updateProfile(
+      { role: ROLE.STUDENT, studentId: 's-new', id: 'u-new', email: 'new@mail.ru' },
+      's-new',
+      { name: 'Новый ученик', note: 'student edit' },
+    )).rejects.toMatchObject({ code: 'forbidden' });
+  });
+
   it('does not create reset token for disabled student through teacher access action', async () => {
     const prisma = {
       studentProfile: {

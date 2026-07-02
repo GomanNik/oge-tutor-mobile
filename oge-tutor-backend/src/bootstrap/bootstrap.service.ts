@@ -138,6 +138,7 @@ export class BootstrapService {
       email: profile.user.email,
       grade: profile.grade,
       goal: profile.goal,
+      note: profile.note || '',
       avatar: profile.avatar,
       bg: profile.bg,
       access: profile.access,

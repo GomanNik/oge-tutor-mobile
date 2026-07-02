@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
-import { MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../common/contracts';
+import { FILE_SCOPE, FileScope, MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../common/contracts';
 import { forbidden, notFound, validationError } from '../common/app-error';
 import { cleanText, requireText } from '../common/validation';
 import { buildFileDownloadUrl } from './file-url';
@@ -18,7 +18,14 @@ type AttachmentLike = Record<string, any>;
 export class FilesService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
 
-  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, _meta: { title?: string; context?: string } = {}) {
+  private uploadScope(user: AuthUser, context = ''): FileScope {
+    const normalized = cleanText(context).toLowerCase();
+    if (normalized === 'homework-submission') return FILE_SCOPE.PRIVATE_SUBMISSION;
+    if (user.role === ROLE.TEACHER && normalized) return FILE_SCOPE.TEACHER_MATERIAL;
+    return FILE_SCOPE.PRIVATE_UPLOAD;
+  }
+
+  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, meta: { title?: string; context?: string } = {}) {
     if (!file) throw validationError('Выберите файл.', { file: 'required' });
     const maxBytes = Number(this.config.get('MAX_UPLOAD_BYTES') || 15 * 1024 * 1024);
     if (file.size > maxBytes) throw validationError('Файл слишком большой.', { file: 'too_large' });
@@ -41,6 +48,7 @@ export class FilesService {
       data: {
         id: fileId,
         ownerId: user.id,
+        scope: this.uploadScope(user, meta.context),
         originalName: file.originalname,
         mimeType: file.mimetype || 'application/octet-stream',
         size: file.size,
@@ -56,9 +64,25 @@ export class FilesService {
     return file;
   }
 
-  async requireAccessibleFile(user: AuthUser, id: string) {
+  async markFileScope(id: string, scope: FileScope, db: any = this.prisma) {
+    return db.fileResource.update({ where: { id }, data: { scope } });
+  }
+
+  async requireAttachableFile(user: AuthUser, id: string) {
     const file = await this.requireFile(id);
-    if (!file.ownerId) throw forbidden('Недостаточно прав для доступа к файлу.');
+    if (file.ownerId !== user.id) throw forbidden('Можно прикреплять только собственные файлы.');
+    if (file.scope === FILE_SCOPE.PRIVATE_SUBMISSION) {
+      throw forbidden('Файл решения нельзя прикреплять как материал.');
+    }
+    return file;
+  }
+
+  async requireAccessibleFile(user: AuthUser, id: string) {
+    return this.requireDownloadAccess(user, id);
+  }
+
+  private async requireDownloadAccess(user: AuthUser, id: string) {
+    const file = await this.requireFile(id);
     if (file.ownerId === user.id) return file;
 
     if (user.role === ROLE.TEACHER && user.teacherId) {
@@ -70,14 +94,58 @@ export class FilesService {
     }
 
     if (user.role === ROLE.STUDENT) {
-      const student = await this.prisma.studentProfile.findFirst({
-        where: { userId: user.id },
-        include: { teacher: true },
-      });
-      if (student?.teacher.userId === file.ownerId) return file;
+      if (await this.studentCanAccessAssignedFile(user, file.id)) return file;
     }
 
     throw forbidden('Недостаточно прав для доступа к файлу.');
+  }
+
+  private fileIdInAttachments(items: unknown, fileId: string): boolean {
+    return Array.isArray(items) && items.some((item: any) => cleanText(item?.fileId || item?.fileResource?.id) === fileId);
+  }
+
+  private async studentCanAccessAssignedFile(user: AuthUser, fileId: string): Promise<boolean> {
+    if (!user.studentId) return false;
+    const student = await this.prisma.studentProfile.findFirst({
+      where: { id: user.studentId, userId: user.id },
+      select: { id: true, teacherId: true },
+    });
+    if (!student) return false;
+
+    const [lessons, homeworks] = await Promise.all([
+      this.prisma.lesson.findMany({
+        where: { studentId: student.id },
+        select: { focusTaskNumbers: true, materials: true },
+      }),
+      this.prisma.homework.findMany({
+        where: { studentId: student.id },
+        select: { taskNumbers: true, materials: true, reviewMaterials: true },
+      }),
+    ]);
+
+    const embedded = [
+      ...lessons.flatMap((lesson: any) => [lesson.materials]),
+      ...homeworks.flatMap((homework: any) => [homework.materials, homework.reviewMaterials]),
+    ].some((items) => this.fileIdInAttachments(items, fileId));
+    if (embedded) return true;
+
+    const taskNumbers = [...new Set([
+      ...lessons.flatMap((lesson: any) => lesson.focusTaskNumbers || []),
+      ...homeworks.flatMap((homework: any) => homework.taskNumbers || []),
+    ])];
+    if (!taskNumbers.length) return false;
+
+    const assignedMaterial = await this.prisma.materialAttachment.findFirst({
+      where: {
+        fileId,
+        topic: {
+          teacherId: student.teacherId,
+          taskNumber: { in: taskNumbers },
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(assignedMaterial);
   }
 
   async requireDownloadableFile(user: AuthUser, id: string) {
@@ -100,7 +168,8 @@ export class FilesService {
 
       if (type === MATERIAL_TYPE.FILE) {
         const fileId = requireText(item.fileId || item.fileResource?.id, `${field}.${index}.fileId`);
-        const file = await this.requireAccessibleFile(user, fileId);
+        const file = await this.requireAttachableFile(user, fileId);
+        await this.markFileScope(file.id, FILE_SCOPE.TEACHER_MATERIAL);
         const mappedFile = this.mapFile(file);
         normalized.push({
           id: cleanText(item.id),

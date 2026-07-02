@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { CurrentUser, AuthUser } from '../common/current-user';
 import { FilesService } from './files.service';
 import { UploadFileMetaDto } from './files.dto';

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
-import { NOTIFICATION_STATUS, PROGRESS_COVERAGE_STATUS, PROGRESS_SOURCE, ROLE } from '../common/contracts';
+import { NOTIFICATION_STATUS, PROGRESS_COVERAGE_STATUS, PROGRESS_SOURCE, ProgressCoverageStatus, ProgressMasteryLevel, ROLE } from '../common/contracts';
 import { forbidden, notFound } from '../common/app-error';
 import { assertProgressConsistency, cleanText, parseTaskNumbers } from '../common/validation';
 
@@ -30,8 +30,8 @@ export class ProgressService {
     const teacherId = this.assertTeacher(user);
     await this.requireStudent(teacherId, studentId);
     const [taskNumber] = parseTaskNumbers([taskNumberInput], 'taskNumber');
-    const coverageStatus = cleanText(payload.coverageStatus) || PROGRESS_COVERAGE_STATUS.IN_PROGRESS;
-    const masteryLevel = payload.masteryLevel === undefined || payload.masteryLevel === '' ? null : cleanText(payload.masteryLevel);
+    const coverageStatus = (cleanText(payload.coverageStatus) || PROGRESS_COVERAGE_STATUS.IN_PROGRESS) as ProgressCoverageStatus;
+    const masteryLevel = (payload.masteryLevel === undefined || payload.masteryLevel === '' ? null : cleanText(payload.masteryLevel)) as ProgressMasteryLevel | null;
     assertProgressConsistency(coverageStatus, masteryLevel);
     const now = new Date();
 

@@ -263,6 +263,7 @@ export function mapStudentDto(dto) {
     email: requireStringField(dto, 'email', 'StudentDto'),
     grade: asOptionalString(dto.grade),
     goal: asOptionalString(dto.goal),
+    note: asOptionalString(dto.note),
     avatar: asOptionalString(dto.avatar),
     bg: asOptionalString(dto.bg),
     access: normalizeAccessStatusDto(dto.access),

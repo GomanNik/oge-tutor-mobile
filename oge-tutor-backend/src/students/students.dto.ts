@@ -28,6 +28,10 @@ export class CreateStudentDto {
   @IsOptional()
   bg?: string;
 
+  @IsString()
+  @IsOptional()
+  note?: string;
+
   @IsObject()
   @IsOptional()
   settings?: Record<string, unknown>;
@@ -52,6 +56,10 @@ export class UpdateStudentProfileDto {
   @IsString()
   @IsOptional()
   bg?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
 }
 
 export class UpdateStudentAccountDto {

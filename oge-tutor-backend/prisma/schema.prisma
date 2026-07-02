@@ -7,31 +7,130 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  teacher
+  student
+}
+
+enum AccessTokenType {
+  invite
+  password_reset
+}
+
+enum AccessStatus {
+  active
+  invite_sent
+  password_pending
+  disabled
+}
+
+enum LessonStatus {
+  planned
+  rescheduled
+  completed
+  canceled
+}
+
+enum LessonSource {
+  manual
+  template
+  import
+}
+
+enum HomeworkStatus {
+  assigned
+  submitted
+  needs_revision
+  reviewed
+  overdue
+}
+
+enum SubmissionStatus {
+  submitted
+  reviewed
+  needs_revision
+}
+
+enum FileScope {
+  private_upload
+  private_submission
+  teacher_material
+  shared_material
+}
+
+enum MaterialType {
+  file
+  link
+  library
+}
+
+enum MaterialSource {
+  upload
+  link
+  library
+}
+
+enum ProgressCoverageStatus {
+  not_started
+  in_progress
+  assessment_needed
+  assessed
+}
+
+enum ProgressMasteryLevel {
+  weak
+  medium
+  good
+  strong
+}
+
+enum ProgressSource {
+  manual
+  lesson_completed
+  homework_result
+  diagnostic
+  import
+}
+
+enum NotificationType {
+  progress_assessment_required
+}
+
+enum NotificationStatus {
+  unread
+  read
+  resolved
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
   passwordHash   String
-  role           String
+  role           Role
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   teacherProfile TeacherProfile?
   studentProfile StudentProfile?
   uploadedFiles  FileResource[]
   accessTokens   AccessToken[]
+
+  @@index([role])
 }
 
 model AccessToken {
   id        String    @id @default(cuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
+  type      AccessTokenType
   tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId, type])
+  @@index([type, expiresAt])
   @@index([expiresAt])
+  @@index([usedAt])
 }
 
 model TeacherProfile {
@@ -62,17 +161,21 @@ model StudentProfile {
   goal           String                @default("")
   avatar         String                @default("")
   bg             String                @default("")
-  access         String                @default("password_pending")
+  note           String                @default("")
+  access         AccessStatus          @default(password_pending)
   settings       Json                  @default("{}")
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   lessons        Lesson[]
   homeworks      Homework[]
   progress       StudentTaskProgress[]
+  historyEvents  ProgressHistory[]
   submissions    HomeworkSubmission[]
   notifications  Notification[]
 
   @@index([teacherId])
+  @@index([teacherId, access])
+  @@index([access])
 }
 
 model Lesson {
@@ -87,8 +190,8 @@ model Lesson {
   endAt             DateTime
   timezone          String
   durationMinutes   Int
-  status            String         @default("planned")
-  source            String         @default("manual")
+  status            LessonStatus   @default(planned)
+  source            LessonSource   @default(manual)
   completedAt       DateTime?
   completionComment String         @default("")
   note              String         @default("")
@@ -101,6 +204,8 @@ model Lesson {
   @@index([teacherId])
   @@index([studentId])
   @@index([startAt])
+  @@index([teacherId, status, startAt])
+  @@index([studentId, status, startAt])
 }
 
 model Homework {
@@ -118,7 +223,7 @@ model Homework {
   submittedAt     DateTime?
   reviewedAt      DateTime?
   closedAt        DateTime?
-  status          String               @default("assigned")
+  status          HomeworkStatus       @default(assigned)
   materials       Json                 @default("[]")
   reviewMaterials Json                 @default("[]")
   solutionFile    String               @default("")
@@ -130,6 +235,8 @@ model Homework {
   @@index([teacherId])
   @@index([studentId])
   @@index([dueAt])
+  @@index([teacherId, status, dueAt])
+  @@index([studentId, status, dueAt])
 }
 
 model HomeworkSubmission {
@@ -140,19 +247,21 @@ model HomeworkSubmission {
   student        StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
   fileResourceId String
   fileResource   FileResource   @relation(fields: [fileResourceId], references: [id], onDelete: Restrict)
-  reviewStatus   String         @default("submitted")
+  reviewStatus   SubmissionStatus @default(submitted)
   submittedAt    DateTime       @default(now())
   reviewedAt     DateTime?
   teacherComment String         @default("")
 
   @@index([homeworkId])
   @@index([studentId])
+  @@index([fileResourceId])
 }
 
 model FileResource {
   id          String               @id @default(cuid())
-  ownerId     String?
-  owner       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  ownerId     String
+  owner       User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  scope       FileScope            @default(private_upload)
   originalName String
   mimeType    String
   size        Int
@@ -161,6 +270,10 @@ model FileResource {
   uploadedAt DateTime             @default(now())
   submissions HomeworkSubmission[]
   attachments MaterialAttachment[]
+
+  @@index([ownerId])
+  @@index([scope])
+  @@index([uploadedAt])
 }
 
 model MaterialTopic {
@@ -181,8 +294,8 @@ model MaterialAttachment {
   id          String         @id @default(cuid())
   topicId     String
   topic       MaterialTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  type        String
-  source      String
+  type        MaterialType
+  source      MaterialSource
   title       String
   url         String         @default("")
   fileId      String?
@@ -195,6 +308,7 @@ model MaterialAttachment {
   createdAt   DateTime       @default(now())
 
   @@index([topicId])
+  @@index([fileId])
 }
 
 model StudentTaskProgress {
@@ -202,14 +316,14 @@ model StudentTaskProgress {
   studentId                String
   student                  StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Cascade)
   taskNumber               Int
-  coverageStatus           String            @default("not_started")
-  masteryLevel             String?
-  lastAssessedMasteryLevel String?
+  coverageStatus           ProgressCoverageStatus @default(not_started)
+  masteryLevel             ProgressMasteryLevel?
+  lastAssessedMasteryLevel ProgressMasteryLevel?
   lessonCount              Int               @default(0)
   lastLessonId             String?
   lastActivityAt           DateTime?
   lastAssessedAt           DateTime?
-  source                   String            @default("manual")
+  source                   ProgressSource    @default(manual)
   teacherComment           String            @default("")
   recommendedAction        String            @default("")
   createdAt                DateTime          @default(now())
@@ -223,26 +337,29 @@ model StudentTaskProgress {
 model ProgressHistory {
   id             String              @id @default(cuid())
   studentId      String
+  student        StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade)
   taskProgressId String?
   taskProgress   StudentTaskProgress? @relation(fields: [taskProgressId], references: [id], onDelete: SetNull)
   taskNumber     Int
   lessonId       String?
   lesson         Lesson?             @relation(fields: [lessonId], references: [id], onDelete: SetNull)
   type           String
-  source         String
-  coverageStatus String
-  masteryLevel   String?
+  source         ProgressSource
+  coverageStatus ProgressCoverageStatus
+  masteryLevel   ProgressMasteryLevel?
   comment        String              @default("")
   createdAt      DateTime            @default(now())
 
   @@index([studentId])
+  @@index([studentId, createdAt])
   @@index([taskProgressId])
+  @@index([lessonId])
 }
 
 model Notification {
   id         String          @id @default(cuid())
-  type       String
-  status     String          @default("unread")
+  type       NotificationType
+  status     NotificationStatus @default(unread)
   teacherId  String
   teacher    TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   studentId  String?
@@ -257,4 +374,7 @@ model Notification {
 
   @@index([teacherId])
   @@index([studentId])
+  @@index([teacherId, status])
+  @@index([studentId, status])
+  @@index([lessonId])
 }

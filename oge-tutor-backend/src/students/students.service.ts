@@ -62,6 +62,7 @@ export class StudentsService {
           goal: cleanText(payload.goal),
           avatar: cleanText(payload.avatar),
           bg: cleanText(payload.bg),
+          note: cleanText(payload.note),
           access: ACCESS_STATUS.INVITE_SENT,
           settings: payload.settings || {},
         },
@@ -77,9 +78,14 @@ export class StudentsService {
     await this.requireMutableStudent(user, studentId);
     const name = cleanText(patch.name);
     if (!name) throw validationError('Имя ученика обязательно.', { name: 'required' });
+    const data: any = { name, grade: cleanText(patch.grade), goal: cleanText(patch.goal), avatar: cleanText(patch.avatar), bg: cleanText(patch.bg) };
+    if (patch.note !== undefined) {
+      if (user.role !== ROLE.TEACHER) throw forbidden('Заметку преподавателя может менять только преподаватель.');
+      data.note = cleanText(patch.note);
+    }
     return this.prisma.studentProfile.update({
       where: { id: studentId },
-      data: { name, grade: cleanText(patch.grade), goal: cleanText(patch.goal), avatar: cleanText(patch.avatar), bg: cleanText(patch.bg) },
+      data,
     });
   }
 

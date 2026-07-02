@@ -29,7 +29,7 @@ describe('api dto mappers', () => {
       session: { id: 't-1', role: ROLE.TEACHER, email: 'teacher@example.com', token: 'token' },
       data: {
         teacher: { id: 't-1', name: 'Teacher', email: 'teacher@example.com', settings: {} },
-        students: [],
+        students: [{ id: 's-1', name: 'Student', email: 'student@example.com', access: 'active', note: 'Teacher note' }],
         lessons: [{ id: 'l-1', studentId: 's-1', startAt: '2026-05-15T10:00:00.000Z', endAt: '2026-05-15T11:00:00.000Z', status: LESSON_STATUS.PLANNED, source: LESSON_SOURCE.MANUAL, materials: [] }],
         homeworks: [{ id: 'hw-1', studentId: 's-1', dueAt: '2026-05-20T20:59:00.000Z', status: HOMEWORK_STATUS.ASSIGNED, materials: [], reviewMaterials: [], attempts: [] }],
         materials: [{ id: 'm-1', taskNumber: 1, title: 'Task 1', files: [{ id: 'a-1', type: MATERIAL_TYPE.LINK, source: MATERIAL_SOURCE.LINK, title: 'Link', url: 'https://example.com' }] }],
@@ -38,6 +38,7 @@ describe('api dto mappers', () => {
     });
 
     expect(result.session.id).toBe('t-1');
+    expect(result.data.students[0].note).toBe('Teacher note');
     expect(result.data.lessons).toHaveLength(1);
     expect(result.data.homeworks).toHaveLength(1);
   });
