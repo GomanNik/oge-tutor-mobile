@@ -30,3 +30,7 @@ export function notFound(message = 'Данные не найдены.') {
 export function conflict(message = 'Конфликт данных. Обновите страницу и повторите действие.', fieldErrors: FieldErrors = {}) {
   return new AppError(409, 'conflict', message, fieldErrors);
 }
+
+export function serviceUnavailable(message = 'Сервис временно недоступен.', fieldErrors: FieldErrors = {}) {
+  return new AppError(503, 'service_unavailable', message, fieldErrors);
+}

@@ -9,10 +9,22 @@ function isEnabled(value) {
   return String(value || '').toLowerCase() === 'true';
 }
 
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function createApiClient() {
   const env = import.meta.env || {};
   const baseUrl = String(env.VITE_API_BASE_URL || '').trim();
   const useMock = isEnabled(env.VITE_USE_MOCK);
+
+  if (env.PROD && useMock) throw new Error('VITE_USE_MOCK=true нельзя использовать в production-сборке.');
+  if (env.PROD && !isHttpUrl(baseUrl)) throw new Error('VITE_API_BASE_URL должен быть валидным http(s) URL.');
 
   if (baseUrl) return createHttpBackend(baseUrl);
   if (useMock) return createMockBackend();

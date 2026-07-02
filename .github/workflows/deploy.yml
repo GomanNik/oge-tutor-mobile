@@ -14,6 +14,13 @@ permissions:
 env:
   PNPM_VERSION: 9.15.9
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/oge_tutor_quality?schema=public
+  JWT_SECRET: deploy-quality-secret
+  PUBLIC_BACKEND_URL: http://localhost:3000
+  APP_FRONTEND_URL: http://localhost:5173
+  FRONTEND_ORIGIN: http://localhost:5173
+  MAILER_PROVIDER: noop
+  VITE_API_BASE_URL: http://localhost:3000
+  VITE_USE_MOCK: "false"
 
 jobs:
   quality:
@@ -41,10 +48,78 @@ jobs:
       - name: Run quality gate
         run: pnpm run quality
 
-  deploy-template:
-    name: Deployment Template
+  docker-build:
+    name: Docker Build
     runs-on: ubuntu-latest
     needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -f oge-tutor-backend/Dockerfile -t oge-tutor-backend:manual .
+
+      - name: Build frontend image
+        run: docker build -f oge-tutor-app/Dockerfile --build-arg VITE_API_BASE_URL=${{ env.VITE_API_BASE_URL }} -t oge-tutor-frontend:manual .
+
+  e2e:
+    name: AppModule E2E
+    runs-on: ubuntu-latest
+    needs: quality
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oge_tutor_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d oge_tutor_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/oge_tutor_e2e?schema=public
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/oge_tutor_e2e?schema=public
+      JWT_SECRET: e2e-test-secret
+      PUBLIC_BACKEND_URL: http://localhost:3000
+      APP_FRONTEND_URL: http://localhost:5173
+      FRONTEND_ORIGIN: http://localhost:5173
+      MAILER_PROVIDER: noop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --dir oge-tutor-backend run prisma:generate
+
+      - name: Apply migrations
+        run: pnpm --dir oge-tutor-backend exec prisma migrate deploy
+
+      - name: Run AppModule e2e tests
+        run: pnpm --dir oge-tutor-backend run test:e2e
+
+  deploy-vps-template:
+    name: Deploy VPS Template
+    runs-on: ubuntu-latest
+    needs: [quality, e2e, docker-build]
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -52,22 +127,47 @@ jobs:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       FRONTEND_DEPLOY_TOKEN: ${{ secrets.FRONTEND_DEPLOY_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Refuse unimplemented targets
-        if: ${{ inputs.target != 'template' }}
-        run: |
-          echo "::error::Deployment target '${{ inputs.target }}' is not implemented yet."
-          echo "Choose a hosting target and add target-specific deploy steps before using this workflow for production."
-          exit 1
 
       - name: Show manual deployment scaffold
         if: ${{ inputs.target == 'template' }}
         run: |
           echo "Manual deployment scaffold is ready."
           echo "No production deployment was attempted."
-          echo "Configure a real target and repository secrets before enabling deployment steps."
-          echo "Expected secret names: DATABASE_URL, JWT_SECRET, PUBLIC_BACKEND_URL, DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, FRONTEND_DEPLOY_TOKEN."
+          echo "Set target=vps only after DEPLOY_* and runtime secrets are configured."
+          echo "Adapt the template steps for VPS, Render, Railway, Vercel or the chosen platform."
+
+      - name: Validate VPS secrets
+        if: ${{ inputs.target == 'vps' }}
+        shell: bash
+        run: |
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DATABASE_URL JWT_SECRET PUBLIC_BACKEND_URL SMTP_HOST SMTP_USER SMTP_PASS; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name secret is required for target=vps"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Stop before target-specific deployment
+        if: ${{ inputs.target == 'vps' }}
+        run: |
+          echo "::error::VPS deployment commands are intentionally not enabled yet."
+          echo "Add SSH known_hosts handling, image transfer/pull strategy and server docker compose commands for the selected VPS."
+          exit 1
+
+      - name: Refuse unknown deployment target
+        if: ${{ inputs.target != 'template' && inputs.target != 'vps' }}
+        run: |
+          echo "::error::Deployment target '${{ inputs.target }}' is not implemented."
+          exit 1

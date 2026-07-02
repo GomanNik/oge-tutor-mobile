@@ -15,7 +15,10 @@ Production path requires a real backend URL:
 
 ```env
 VITE_API_BASE_URL=https://your-api.example.com
+VITE_USE_MOCK=false
 ```
+
+Production builds validate `VITE_API_BASE_URL` and reject `VITE_USE_MOCK=true`.
 
 The local mock backend is disabled by default and can be enabled only explicitly for development:
 

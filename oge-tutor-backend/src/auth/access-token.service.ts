@@ -14,10 +14,16 @@ export type AccessTokenPreview = {
   expiresAt: string;
 };
 
+export type AccessTokenDelivery = {
+  link: string;
+  expiresAt: string;
+};
+
 export type CreatedAccessToken = {
   id: string;
   type: AccessTokenType;
   expiresAt: Date;
+  delivery: AccessTokenDelivery;
   preview?: AccessTokenPreview;
 };
 
@@ -55,11 +61,15 @@ export class AccessTokenService {
     return type === ACCESS_TOKEN_TYPE.INVITE ? 'setup-password' : 'reset-password';
   }
 
+  private buildDelivery(type: AccessTokenType, token: string, expiresAt: Date): AccessTokenDelivery {
+    const frontendOrigin = this.config.get<string>('APP_FRONTEND_URL') || this.config.get<string>('FRONTEND_ORIGIN') || 'http://localhost:5173';
+    const link = `${frontendOrigin.replace(/\/$/, '')}/${this.setupPath(type)}?token=${encodeURIComponent(token)}`;
+    return { link, expiresAt: expiresAt.toISOString() };
+  }
+
   private buildPreview(type: AccessTokenType, token: string, expiresAt: Date): AccessTokenPreview | undefined {
     if (isProduction(this.config)) return undefined;
-    const frontendOrigin = this.config.get<string>('FRONTEND_ORIGIN') || 'http://localhost:5173';
-    const link = `${frontendOrigin.replace(/\/$/, '')}/${this.setupPath(type)}?token=${encodeURIComponent(token)}`;
-    return { token, link, expiresAt: expiresAt.toISOString() };
+    return { token, ...this.buildDelivery(type, token, expiresAt) };
   }
 
   async createForUser(userId: string, type: AccessTokenType, db: any = this.prisma): Promise<CreatedAccessToken> {
@@ -77,6 +87,7 @@ export class AccessTokenService {
       id: saved.id,
       type,
       expiresAt,
+      delivery: this.buildDelivery(type, token, expiresAt),
       preview: this.buildPreview(type, token, expiresAt),
     };
   }

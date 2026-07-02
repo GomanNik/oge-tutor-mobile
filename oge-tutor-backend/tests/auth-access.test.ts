@@ -82,7 +82,11 @@ describe('auth access hardening', () => {
 describe('invite and reset tokens', () => {
   it('creates a password reset token for existing accounts without failing on unknown email', async () => {
     const prisma = { user: { findUnique: vi.fn(async ({ where }) => (where.email === 'known@mail.ru' ? { id: 'u-known', email: where.email } : null)) } };
-    const accessTokens = { createForUser: vi.fn(async () => ({ id: 'reset-1', preview: { token: 'dev-reset' } })) };
+    const accessTokens = { createForUser: vi.fn(async () => ({
+      id: 'reset-1',
+      delivery: { link: 'http://app/reset-password?token=dev-reset', expiresAt: new Date().toISOString() },
+      preview: { token: 'dev-reset' },
+    })) };
     const mailer = { sendAccessTokenLink: vi.fn() };
     const service = new AuthService(prisma as any, { sign: vi.fn() } as any, config(), accessTokens as any, mailer as any);
 
@@ -127,6 +131,7 @@ describe('invite and reset tokens', () => {
     const result = await service.createForUser('user-1', ACCESS_TOKEN_TYPE.PASSWORD_RESET);
 
     expect(result.preview).toBeUndefined();
+    expect(result.delivery.link).toContain('/reset-password?token=');
     expect(created[0].tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(created[0].tokenHash).not.toContain('user-1');
     expect(created[0].expiresAt.getTime()).toBeGreaterThan(Date.now());
@@ -153,7 +158,11 @@ describe('invite and reset tokens', () => {
       user: { findUnique: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback) => callback(tx)),
     };
-    const accessTokens = { createForUser: vi.fn(async () => ({ id: 'invite-1', preview: { token: 'dev-token' } })) };
+    const accessTokens = { createForUser: vi.fn(async () => ({
+      id: 'invite-1',
+      delivery: { link: 'http://app/setup-password?token=dev-token', expiresAt: new Date().toISOString() },
+      preview: { token: 'dev-token' },
+    })) };
     const mailer = { sendAccessTokenLink: vi.fn() };
     const service = new StudentsService(prisma as any, accessTokens as any, mailer as any);
 
@@ -163,7 +172,12 @@ describe('invite and reset tokens', () => {
     await expect(bcrypt.compare('123456', createdUser.passwordHash)).resolves.toBe(false);
     expect(createdProfile.access).toBe(ACCESS_STATUS.INVITE_SENT);
     expect(accessTokens.createForUser).toHaveBeenCalledWith('u-new', ACCESS_TOKEN_TYPE.INVITE, tx);
-    expect(mailer.sendAccessTokenLink).toHaveBeenCalledWith({ email: 'new@mail.ru', type: ACCESS_TOKEN_TYPE.INVITE, preview: { token: 'dev-token' } });
+    expect(mailer.sendAccessTokenLink).toHaveBeenCalledWith({
+      email: 'new@mail.ru',
+      type: ACCESS_TOKEN_TYPE.INVITE,
+      delivery: expect.any(Object),
+      preview: { token: 'dev-token' },
+    });
   });
 
   it('stores teacher note on create and update, but blocks student editing that note', async () => {
@@ -190,7 +204,11 @@ describe('invite and reset tokens', () => {
     };
     const service = new StudentsService(
       prisma as any,
-      { createForUser: vi.fn(async () => ({ id: 'invite-1', preview: undefined })) } as any,
+      { createForUser: vi.fn(async () => ({
+        id: 'invite-1',
+        delivery: { link: 'http://app/setup-password?token=dev-token', expiresAt: new Date().toISOString() },
+        preview: undefined,
+      })) } as any,
       { sendAccessTokenLink: vi.fn() } as any,
     );
 

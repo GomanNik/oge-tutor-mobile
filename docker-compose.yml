@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-oge_tutor}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - oge_tutor_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-oge_tutor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: oge-tutor-backend:local
+    build:
+      context: .
+      dockerfile: oge-tutor-backend/Dockerfile
+    command: ["pnpm", "--dir", "oge-tutor-backend", "exec", "prisma", "migrate", "deploy"]
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/oge_tutor?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:3000}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:8080}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      MAILER_PROVIDER: ${MAILER_PROVIDER:-noop}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-OGE Tutor <no-reply@example.com>}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    image: oge-tutor-backend:local
+    build:
+      context: .
+      dockerfile: oge-tutor-backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/oge_tutor?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PORT: 3000
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:3000}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:8080}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      UPLOAD_DIR: /app/oge-tutor-backend/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+      MAILER_PROVIDER: ${MAILER_PROVIDER:-noop}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-OGE Tutor <no-reply@example.com>}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - oge_tutor_uploads:/app/oge-tutor-backend/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: oge-tutor-frontend:local
+    build:
+      context: .
+      dockerfile: oge-tutor-app/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  oge_tutor_pg:
+  oge_tutor_uploads:

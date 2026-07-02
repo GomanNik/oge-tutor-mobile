@@ -11,6 +11,8 @@ Production-oriented backend for the current OGE Tutor frontend. The frontend con
 - Role-scoped bootstrap for `teacher` and `student`
 - DTO classes + global `ValidationPipe`
 - Unified error contract
+- SMTP-backed invite/reset flow in production
+- Health and readiness endpoints
 
 ## Quick start
 
@@ -44,6 +46,15 @@ VITE_API_BASE_URL=http://localhost:3000
 VITE_USE_MOCK=false
 ```
 
+Health:
+
+```text
+GET /health
+GET /health/ready
+```
+
+Production requires `DATABASE_URL`, `JWT_SECRET`, `PUBLIC_BACKEND_URL`, `APP_FRONTEND_URL` and SMTP env when `NODE_ENV=production`. See `docs/env.md`.
+
 ## Demo users
 
 ```text
@@ -59,6 +70,8 @@ maria@mail.ru / 123456
 - `POST /auth/login`
 - `POST /auth/logout`
 - `POST /auth/password-reset`
+- `POST /auth/access-token/verify`
+- `POST /auth/access-token/complete`
 - `GET /bootstrap`
 
 `/bootstrap` returns `session + data` and all API responses are `no-store` to avoid `304` payload loss.
@@ -107,6 +120,11 @@ Homework has `description`. Review accepts frontend `status: reviewed | needs_re
 - `DELETE /materials/:topicId/files/:fileId`
 
 File URLs are absolute using `PUBLIC_BACKEND_URL`. Embedded lesson/homework/review materials are normalized and file attachments are checked by ownership/scope.
+
+### Health
+
+- `GET /health`
+- `GET /health/ready`
 
 ### Progress
 

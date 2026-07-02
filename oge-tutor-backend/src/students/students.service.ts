@@ -70,7 +70,7 @@ export class StudentsService {
       const invite = await this.accessTokens.createForUser(studentUser.id, ACCESS_TOKEN_TYPE.INVITE, tx as any);
       return { student, invite };
     });
-    await this.mailer.sendAccessTokenLink({ email, type: ACCESS_TOKEN_TYPE.INVITE, preview: result.invite.preview });
+    await this.mailer.sendAccessTokenLink({ email, type: ACCESS_TOKEN_TYPE.INVITE, delivery: result.invite.delivery, preview: result.invite.preview });
     return result;
   }
 
@@ -127,12 +127,12 @@ export class StudentsService {
     const updated = await this.prisma.studentProfile.update({ where: { id: studentId }, data: { access } });
     if (action === STUDENT_ACCESS_ACTION.RESEND_INVITE) {
       const invite = await this.accessTokens.createForUser(student.userId, ACCESS_TOKEN_TYPE.INVITE);
-      await this.mailer.sendAccessTokenLink({ email: student.user.email, type: ACCESS_TOKEN_TYPE.INVITE, preview: invite.preview });
+      await this.mailer.sendAccessTokenLink({ email: student.user.email, type: ACCESS_TOKEN_TYPE.INVITE, delivery: invite.delivery, preview: invite.preview });
       return { student: updated, invite };
     }
     if (action === STUDENT_ACCESS_ACTION.RESET_PASSWORD) {
       const reset = await this.accessTokens.createForUser(student.userId, ACCESS_TOKEN_TYPE.PASSWORD_RESET);
-      await this.mailer.sendAccessTokenLink({ email: student.user.email, type: ACCESS_TOKEN_TYPE.PASSWORD_RESET, preview: reset.preview });
+      await this.mailer.sendAccessTokenLink({ email: student.user.email, type: ACCESS_TOKEN_TYPE.PASSWORD_RESET, delivery: reset.delivery, preview: reset.preview });
       return { student: updated, reset };
     }
     return { student: updated };

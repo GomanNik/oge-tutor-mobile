@@ -14,14 +14,16 @@ import { HomeworksModule } from './homeworks/homeworks.module';
 import { FilesModule } from './files/files.module';
 import { MaterialsModule } from './materials/materials.module';
 import { ProgressModule } from './progress/progress.module';
+import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RoleGuard } from './common/role.guard';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}),
     PrismaModule,
@@ -34,6 +36,7 @@ import { OperationLoggerInterceptor } from './common/operation-logger.intercepto
     FilesModule,
     MaterialsModule,
     ProgressModule,
+    HealthModule,
   ],
   providers: [
     JwtStrategy,

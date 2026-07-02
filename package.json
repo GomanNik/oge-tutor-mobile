@@ -7,6 +7,7 @@
     "backend:build": "pnpm --dir oge-tutor-backend run build",
     "backend:lint": "pnpm --dir oge-tutor-backend run lint",
     "backend:test": "pnpm --dir oge-tutor-backend test",
+    "backend:test:e2e": "pnpm --dir oge-tutor-backend run test:e2e",
     "frontend:build": "pnpm --dir oge-tutor-app run build",
     "frontend:lint": "pnpm --dir oge-tutor-app run lint",
     "frontend:typecheck": "pnpm --dir oge-tutor-app run typecheck",

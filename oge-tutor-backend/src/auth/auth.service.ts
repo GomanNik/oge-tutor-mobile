@@ -57,8 +57,8 @@ export class AuthService {
     if (!user) return { ok: true };
     if (user.role === ROLE.STUDENT && user.studentProfile?.access === ACCESS_STATUS.DISABLED) return { ok: true };
     const reset = await this.accessTokens.createForUser(user.id, ACCESS_TOKEN_TYPE.PASSWORD_RESET);
-    await this.mailer.sendAccessTokenLink({ email: user.email, type: ACCESS_TOKEN_TYPE.PASSWORD_RESET, preview: reset.preview });
-    return { ok: true, reset: reset.preview };
+    await this.mailer.sendAccessTokenLink({ email: user.email, type: ACCESS_TOKEN_TYPE.PASSWORD_RESET, delivery: reset.delivery, preview: reset.preview });
+    return reset.preview ? { ok: true, reset: reset.preview } : { ok: true };
   }
 
   async signSession(user: { id: string; email: string; role: string }): Promise<SessionPayload> {
