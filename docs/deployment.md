@@ -84,6 +84,30 @@ GET /health/ready
 - backend and frontend Docker builds;
 - VPS deployment through SSH when the workflow input is `confirm=deploy-vps`.
 
+### One-Time VPS Setup
+
+Provision the server before running the workflow:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl rsync
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
+```
+
+Create the deploy directory and ensure the SSH deploy user can write to it:
+
+```bash
+sudo mkdir -p /opt/oge-tutor
+sudo chown "$USER":"$USER" /opt/oge-tutor
+docker compose version
+```
+
 The workflow syncs the repository to `DEPLOY_PATH` with `rsync`, writes a server-side `.env` from GitHub Secrets, runs `docker compose config`, then runs:
 
 ```bash
@@ -96,6 +120,7 @@ It finishes by checking:
 ```bash
 curl --fail "$PUBLIC_BACKEND_URL/health"
 curl --fail "$PUBLIC_BACKEND_URL/health/ready"
+curl --fail "$APP_FRONTEND_URL"
 ```
 
 ### Required GitHub Secrets
@@ -110,6 +135,7 @@ JWT_SECRET
 PUBLIC_BACKEND_URL
 APP_FRONTEND_URL
 FRONTEND_ORIGIN
+MAILER_PROVIDER
 SMTP_HOST
 SMTP_PORT
 SMTP_USER
@@ -131,7 +157,29 @@ Optional:
 SMTP_SECURE
 ```
 
+Set `MAILER_PROVIDER=smtp` for VPS deployment. `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` must be real provider values; production startup rejects incomplete SMTP configuration.
+
 If `DATABASE_URL` points to an external managed database, `POSTGRES_PASSWORD` can be empty, but the bundled `postgres` service will still be present in Compose unless the Compose file is adapted for the managed database target.
+
+### Manual Deploy Run
+
+After all Secrets are configured:
+
+1. Open GitHub Actions.
+2. Select `Manual VPS Deploy`.
+3. Click `Run workflow`.
+4. Use branch `main`.
+5. Set `confirm` to `deploy-vps`.
+
+After the workflow succeeds, verify the server:
+
+```bash
+cd "$DEPLOY_PATH"
+docker compose ps
+curl --fail "$PUBLIC_BACKEND_URL/health"
+curl --fail "$PUBLIC_BACKEND_URL/health/ready"
+curl --fail "$APP_FRONTEND_URL"
+```
 
 ## Server Requirements
 

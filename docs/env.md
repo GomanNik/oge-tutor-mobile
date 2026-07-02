@@ -87,6 +87,7 @@ JWT_SECRET
 PUBLIC_BACKEND_URL
 APP_FRONTEND_URL
 FRONTEND_ORIGIN
+MAILER_PROVIDER
 SMTP_HOST
 SMTP_PORT
 SMTP_USER
@@ -107,5 +108,7 @@ Optional:
 ```text
 SMTP_SECURE
 ```
+
+Use `MAILER_PROVIDER=smtp` for staging and production. Use `MAILER_PROVIDER=noop` only for development or tests.
 
 `DATABASE_URL` must match the actual database used by Compose or the managed database provider. Do not put secret values in workflow files or docs.

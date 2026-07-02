@@ -2,6 +2,18 @@
 
 This runbook assumes the VPS deployment uses the root `docker-compose.yml`.
 
+## Manual Deploy
+
+Use GitHub Actions for staging deployment:
+
+1. Open Actions.
+2. Select `Manual VPS Deploy`.
+3. Click `Run workflow`.
+4. Select branch `main`.
+5. Enter `deploy-vps` in the `confirm` input.
+
+The workflow runs quality checks, AppModule e2e tests, Docker builds, syncs files to the VPS, writes `.env`, runs `docker compose up -d --build`, then checks backend and frontend endpoints.
+
 ## Health
 
 Backend liveness:
@@ -21,6 +33,34 @@ Container state:
 ```bash
 cd "$DEPLOY_PATH"
 docker compose ps
+```
+
+Frontend:
+
+```bash
+curl --fail "$APP_FRONTEND_URL"
+```
+
+## SMTP
+
+Staging and production require SMTP. Configure these GitHub Secrets before deployment:
+
+```text
+MAILER_PROVIDER=smtp
+SMTP_HOST=<provider-host>
+SMTP_PORT=587
+SMTP_USER=<provider-user>
+SMTP_PASS=<provider-password>
+SMTP_FROM=OGE Tutor <no-reply@example.com>
+```
+
+Use `SMTP_SECURE=true` only when the provider requires implicit TLS, usually on port `465`; otherwise keep it `false` for STARTTLS on port `587`.
+
+After deploy, send a password reset or invite flow from the app and verify:
+
+```bash
+cd "$DEPLOY_PATH"
+docker compose logs --tail=200 backend
 ```
 
 ## Logs

@@ -133,6 +133,7 @@ jobs:
       POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
       POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      MAILER_PROVIDER: ${{ secrets.MAILER_PROVIDER }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
@@ -151,12 +152,16 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DATABASE_URL JWT_SECRET PUBLIC_BACKEND_URL APP_FRONTEND_URL FRONTEND_ORIGIN SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DATABASE_URL JWT_SECRET PUBLIC_BACKEND_URL APP_FRONTEND_URL FRONTEND_ORIGIN MAILER_PROVIDER SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM; do
             if [ -z "${!name}" ]; then
               echo "::error::$name secret is required for VPS deployment"
               missing=1
             fi
           done
+          if [ "$MAILER_PROVIDER" != "smtp" ]; then
+            echo "::error::MAILER_PROVIDER must be smtp for VPS deployment"
+            missing=1
+          fi
           if [ -z "$POSTGRES_PASSWORD" ]; then
             echo "::warning::POSTGRES_PASSWORD secret is empty. This is acceptable only when DATABASE_URL points to an external managed database."
           fi
@@ -227,7 +232,7 @@ jobs:
             write_env VITE_API_BASE_URL "${PUBLIC_BACKEND_URL}"
             write_env UPLOAD_DIR "uploads"
             write_env MAX_UPLOAD_BYTES "15728640"
-            write_env MAILER_PROVIDER "smtp"
+            write_env MAILER_PROVIDER "${MAILER_PROVIDER}"
             write_env SMTP_HOST "${SMTP_HOST}"
             write_env SMTP_PORT "${SMTP_PORT}"
             write_env SMTP_SECURE "${SMTP_SECURE:-false}"
@@ -249,3 +254,8 @@ jobs:
         run: |
           curl --fail --silent --show-error "$PUBLIC_BACKEND_URL/health"
           curl --fail --silent --show-error "$PUBLIC_BACKEND_URL/health/ready"
+
+      - name: Verify frontend endpoint
+        shell: bash
+        run: |
+          curl --fail --silent --show-error "$APP_FRONTEND_URL" >/dev/null
