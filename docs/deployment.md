@@ -35,6 +35,35 @@ pnpm --dir oge-tutor-backend exec prisma migrate status
 
 Do not use `prisma migrate dev` for production. Seed is not run automatically by Compose, CI or deploy.
 
+## First Teacher Bootstrap
+
+On a clean production database, run migrations first, then create the first teacher with the one-time bootstrap command:
+
+```powershell
+$env:BOOTSTRAP_TEACHER_EMAIL="teacher@example.com"
+$env:BOOTSTRAP_TEACHER_PASSWORD="<unique-strong-password>"
+$env:BOOTSTRAP_TEACHER_NAME="Teacher Name"
+pnpm --dir oge-tutor-backend run bootstrap:teacher
+```
+
+The command can also receive CLI flags:
+
+```powershell
+pnpm --dir oge-tutor-backend run bootstrap:teacher -- --email teacher@example.com --password "<unique-strong-password>" --name "Teacher Name"
+```
+
+For the Compose runtime, run it against the backend image after `migrate` has completed:
+
+```bash
+docker compose run --rm \
+  -e BOOTSTRAP_TEACHER_EMAIL=teacher@example.com \
+  -e BOOTSTRAP_TEACHER_PASSWORD='<unique-strong-password>' \
+  -e BOOTSTRAP_TEACHER_NAME='Teacher Name' \
+  backend pnpm run bootstrap:teacher
+```
+
+This command is intentionally one-time: it refuses to run when any teacher already exists and never prints the password. Do not run `prisma:seed` in production; the seed is destructive demo data only.
+
 ## Health Checks
 
 Backend:

@@ -29,7 +29,12 @@ JWT_EXPIRES_IN=7d
 PORT=3000
 UPLOAD_DIR=uploads
 MAX_UPLOAD_BYTES=15728640
+BOOTSTRAP_TEACHER_EMAIL=teacher@example.com
+BOOTSTRAP_TEACHER_PASSWORD=unique-strong-password
+BOOTSTRAP_TEACHER_NAME=Teacher Name
 ```
+
+`BOOTSTRAP_TEACHER_*` values are read only by the one-time `pnpm --dir oge-tutor-backend run bootstrap:teacher` command. They are not required for normal backend startup and should not be kept in long-lived `.env` files after the first teacher is created.
 
 Production validation rejects missing `DATABASE_URL`, weak/default `JWT_SECRET`, missing public URLs and incomplete SMTP configuration.
 

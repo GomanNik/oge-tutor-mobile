@@ -55,6 +55,17 @@ GET /health/ready
 
 Production requires `DATABASE_URL`, `JWT_SECRET`, `PUBLIC_BACKEND_URL`, `APP_FRONTEND_URL` and SMTP env when `NODE_ENV=production`. See `docs/env.md`.
 
+For a clean production database, do not run the demo seed. After migrations, create the first teacher with:
+
+```powershell
+$env:BOOTSTRAP_TEACHER_EMAIL="teacher@example.com"
+$env:BOOTSTRAP_TEACHER_PASSWORD="<unique-strong-password>"
+$env:BOOTSTRAP_TEACHER_NAME="Teacher Name"
+pnpm run bootstrap:teacher
+```
+
+The bootstrap command is one-time and refuses to run after a teacher exists.
+
 ## Demo users
 
 ```text

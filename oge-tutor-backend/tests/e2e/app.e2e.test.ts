@@ -107,10 +107,29 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(inviteToken).toBeTruthy();
 
     await request(server)
+      .post('/auth/login')
+      .send({ email: 'student-e2e@mail.ru', password: 'studentpass' })
+      .expect(401);
+
+    await request(server)
+      .post('/auth/access-token/verify')
+      .send({ token: inviteToken })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ valid: true, type: 'invite' });
+        expect(body.account.email).toContain('@');
+      });
+
+    await request(server)
       .post('/auth/access-token/complete')
       .send({ token: inviteToken, password: 'studentpass' })
       .expect(201)
       .expect(({ body }) => expect(body).toEqual({ ok: true }));
+
+    await request(server)
+      .post('/auth/access-token/complete')
+      .send({ token: inviteToken, password: 'studentpass2' })
+      .expect(409);
 
     const activated = await prisma.studentProfile.findUnique({ where: { id: studentId } });
     expect(activated.access).toBe(ACCESS_STATUS.ACTIVE);
@@ -141,6 +160,19 @@ describeIfDb('AppModule e2e production flows', () => {
 
     const startAt = new Date(Date.now() + 60 * 60 * 1000);
     const endAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    await request(server)
+      .post('/lessons')
+      .set(auth(teacherToken))
+      .send({
+        studentId,
+        topic: 'Past lesson',
+        startAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        endAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        timezone: 'Europe/Moscow',
+      })
+      .expect(422);
+
     const lessonCreated = await request(server)
       .post('/lessons')
       .set(auth(teacherToken))
@@ -157,6 +189,18 @@ describeIfDb('AppModule e2e production flows', () => {
     const lessonId = lessonCreated.body.data.lessons[0].id;
 
     await request(server)
+      .post('/lessons')
+      .set(auth(teacherToken))
+      .send({
+        studentId,
+        topic: 'Conflicting lesson',
+        startAt: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+        endAt: new Date(Date.now() + 150 * 60 * 1000).toISOString(),
+        timezone: 'Europe/Moscow',
+      })
+      .expect(409);
+
+    await request(server)
       .get(`/files/${materialFileId}/download`)
       .set(auth(studentToken))
       .expect(200);
@@ -166,6 +210,12 @@ describeIfDb('AppModule e2e production flows', () => {
       .set(auth(teacherToken))
       .send({ focusTaskNumbers: [6], completionComment: 'Done' })
       .expect(201);
+
+    await request(server)
+      .post(`/lessons/${lessonId}/complete`)
+      .set(auth(teacherToken))
+      .send({ focusTaskNumbers: [6], completionComment: 'Duplicate' })
+      .expect(409);
 
     const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const homeworkCreated = await request(server)
@@ -179,6 +229,22 @@ describeIfDb('AppModule e2e production flows', () => {
       })
       .expect(201);
     const homeworkId = homeworkCreated.body.data.homeworks[0].id;
+
+    const unsentHomework = await request(server)
+      .post('/homeworks')
+      .set(auth(teacherToken))
+      .send({
+        studentId,
+        title: 'Unsent Homework',
+        taskNumbers: [7],
+        dueAt: dueAt.toISOString(),
+      })
+      .expect(201);
+    await request(server)
+      .post(`/homeworks/${unsentHomework.body.data.homeworks[0].id}/review`)
+      .set(auth(teacherToken))
+      .send({ status: 'reviewed', comment: 'Too early' })
+      .expect(409);
 
     await request(server)
       .post(`/homeworks/${homeworkId}/submissions`)
@@ -228,11 +294,65 @@ describeIfDb('AppModule e2e production flows', () => {
       .set(auth(studentToken))
       .expect(403);
 
+    const otherTeacherUser = await prisma.user.create({
+      data: {
+        email: 'other-teacher@mail.ru',
+        role: ROLE.TEACHER,
+        passwordHash: await bcrypt.hash('otherpass', 4),
+        teacherProfile: {
+          create: {
+            name: 'Other Teacher',
+            settings: {},
+          },
+        },
+      },
+      include: { teacherProfile: true },
+    });
+    const otherStudentUser = await prisma.user.create({
+      data: {
+        email: 'other-student@mail.ru',
+        role: ROLE.STUDENT,
+        passwordHash: await bcrypt.hash('otherstudentpass', 4),
+        studentProfile: {
+          create: {
+            teacherId: otherTeacherUser.teacherProfile.id,
+            name: 'Other Student',
+            access: ACCESS_STATUS.ACTIVE,
+            settings: {},
+          },
+        },
+      },
+    });
+    const otherFilePath = path.join(uploadDir, 'other-private.txt');
+    fs.writeFileSync(otherFilePath, 'other');
+    const otherFile = await prisma.fileResource.create({
+      data: {
+        ownerId: otherStudentUser.id,
+        originalName: 'other-private.txt',
+        mimeType: 'text/plain',
+        size: 5,
+        url: 'http://127.0.0.1:3000/files/other-private/download',
+        storagePath: otherFilePath,
+      },
+    });
+
+    await request(server)
+      .get(`/files/${otherFile.id}/download`)
+      .set(auth(teacherToken))
+      .expect(403);
+
     await request(server)
       .post(`/homeworks/${homeworkId}/review`)
       .set(auth(teacherToken))
       .send({ status: 'reviewed', comment: 'Accepted' })
       .expect(201);
+
+    await request(server)
+      .post(`/homeworks/${homeworkId}/submissions`)
+      .set(auth(studentToken))
+      .field('fileTitle', 'answer-again.txt')
+      .attach('file', Buffer.from('answer again'), 'answer-again.txt')
+      .expect(409);
 
     const resetRequest = await request(server)
       .post('/auth/password-reset')
@@ -247,8 +367,26 @@ describeIfDb('AppModule e2e production flows', () => {
       .expect(201);
 
     await request(server)
+      .post('/auth/access-token/complete')
+      .send({ token: resetToken, password: 'teacherpass3' })
+      .expect(409);
+
+    await request(server)
       .post('/auth/login')
       .send({ email: 'teacher-e2e@mail.ru', password: 'teacherpass2' })
       .expect(201);
+
+    await prisma.studentProfile.update({ where: { id: studentId }, data: { access: ACCESS_STATUS.DISABLED } });
+    await request(server)
+      .post('/auth/password-reset')
+      .send({ email: 'student-e2e@mail.ru' })
+      .expect(201)
+      .expect(({ body }) => expect(body).toEqual({ ok: true }));
+
+    await request(server)
+      .post('/auth/password-reset')
+      .send({ email: 'unknown-e2e@mail.ru' })
+      .expect(201)
+      .expect(({ body }) => expect(body).toEqual({ ok: true }));
   });
 });

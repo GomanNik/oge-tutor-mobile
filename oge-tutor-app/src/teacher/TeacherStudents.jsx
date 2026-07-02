@@ -32,6 +32,17 @@ const STUDENT_CARD_TABS = [
   { value: STUDENT_CARD_TAB.ACCESS, label: 'Доступ' },
 ];
 
+function AccessPreview({ preview, label = 'Dev-ссылка доступа' }) {
+  if (!preview?.link) return null;
+  return (
+    <div className="inline-note success">
+      <div>{label}</div>
+      <a href={preview.link} target="_blank" rel="noreferrer">{preview.link}</a>
+      {preview.token ? <div className="file-source">{preview.token}</div> : null}
+    </div>
+  );
+}
+
 export function StudentsList({ data, openStudent, openCreate }) {
   return (
     <>
@@ -62,14 +73,15 @@ export function StudentsList({ data, openStudent, openCreate }) {
 export function CreateStudent({ actions, onBack }) {
   const [form, setForm] = useState({ name: '', email: '', grade: '', goal: '', note: '' });
   const [error, setError] = useState('');
+  const [invitePreview, setInvitePreview] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
   async function submit() {
     try {
       setIsSaving(true);
       setError('');
-      await actions.createStudent(form);
-      onBack();
+      const result = await actions.createStudent(form);
+      setInvitePreview(result?.invite || null);
     } catch (err) {
       setError(err?.message || 'Не удалось создать ученика.');
     } finally {
@@ -88,7 +100,9 @@ export function CreateStudent({ actions, onBack }) {
         <Field label="Цель" value={form.goal} onChange={(goal) => setForm({ ...form, goal })} placeholder="Например: ОГЭ на 4" />
         <TextArea label="Комментарий" value={form.note} onChange={(note) => setForm({ ...form, note })} placeholder="Что важно помнить по ученику" />
         <div className="card card-amber-soft">Публичной регистрации нет: преподаватель создаёт аккаунт, а backend готовит ссылку для установки пароля.</div>
-        <Button onClick={submit} disabled={!form.name.trim() || !form.email.trim() || isSaving}>{isSaving ? 'Создаём…' : 'Создать доступ'}</Button>
+        <AccessPreview preview={invitePreview} label="Dev-ссылка приглашения" />
+        {invitePreview ? <Button variant="light" onClick={onBack}>К списку учеников</Button> : null}
+        <Button onClick={submit} disabled={!form.name.trim() || !form.email.trim() || isSaving || Boolean(invitePreview)}>{isSaving ? 'Создаём…' : 'Создать доступ'}</Button>
       </Card>
     </>
   );
@@ -98,6 +112,7 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
   const [tab, setTab] = useState(STUDENT_CARD_TAB.OVERVIEW);
   const [accessMessage, setAccessMessage] = useState('');
   const [accessError, setAccessError] = useState('');
+  const [accessPreview, setAccessPreview] = useState(null);
   const student = getStudent(data, studentId);
 
   if (!student) {
@@ -117,7 +132,9 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
     try {
       setAccessError('');
       setAccessMessage('');
-      await action(student.id);
+      setAccessPreview(null);
+      const result = await action(student.id);
+      setAccessPreview(result?.invite || result?.reset || null);
       setAccessMessage(successText);
     } catch (err) {
       setAccessError(err?.message || 'Не удалось выполнить действие.');
@@ -196,6 +213,7 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
               <Badge tone={toneByStatus(student.access)}>{statusLabel(student.access)}</Badge>
             </div>
             {accessMessage ? <div className="inline-note success">{accessMessage}</div> : null}
+            <AccessPreview preview={accessPreview} />
             {accessError ? <div className="inline-error">{accessError}</div> : null}
             <Button variant="light" onClick={() => runAccessAction(actions.resendStudentInvite, 'Ссылка приглашения обновлена.')}>Обновить приглашение</Button>
             <Button variant="soft" onClick={() => runAccessAction(actions.resetStudentPassword, 'Ссылка установки пароля обновлена.')}>Сбросить ссылку установки пароля</Button>
