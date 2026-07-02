@@ -28,6 +28,13 @@ pnpm run prisma:seed
 pnpm run dev
 ```
 
+When working from the repository root, use the workspace install:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm run quality
+```
+
 The default Docker PostgreSQL port is `5433` to avoid conflicts with local PostgreSQL/Supabase.
 
 Frontend `.env.local`:

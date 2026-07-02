@@ -1,0 +1,73 @@
+name: Manual Deploy Scaffold
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment target. Keep 'template' until a real platform is configured."
+        required: true
+        default: "template"
+
+permissions:
+  contents: read
+
+env:
+  PNPM_VERSION: 9.15.9
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/oge_tutor_quality?schema=public
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run quality gate
+        run: pnpm run quality
+
+  deploy-template:
+    name: Deployment Template
+    runs-on: ubuntu-latest
+    needs: quality
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      PUBLIC_BACKEND_URL: ${{ secrets.PUBLIC_BACKEND_URL }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      FRONTEND_DEPLOY_TOKEN: ${{ secrets.FRONTEND_DEPLOY_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refuse unimplemented targets
+        if: ${{ inputs.target != 'template' }}
+        run: |
+          echo "::error::Deployment target '${{ inputs.target }}' is not implemented yet."
+          echo "Choose a hosting target and add target-specific deploy steps before using this workflow for production."
+          exit 1
+
+      - name: Show manual deployment scaffold
+        if: ${{ inputs.target == 'template' }}
+        run: |
+          echo "Manual deployment scaffold is ready."
+          echo "No production deployment was attempted."
+          echo "Configure a real target and repository secrets before enabling deployment steps."
+          echo "Expected secret names: DATABASE_URL, JWT_SECRET, PUBLIC_BACKEND_URL, DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, FRONTEND_DEPLOY_TOKEN."

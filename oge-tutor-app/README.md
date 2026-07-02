@@ -5,8 +5,8 @@ Backend-ready frontend for a mobile-style tutor cabinet. Runtime data access goe
 ## Run
 
 ```powershell
-npm install
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 ## Backend mode
@@ -47,13 +47,13 @@ These credentials exist only in the mock adapter. The UI itself has no hardcoded
 ## Quality gate
 
 ```powershell
-npm run build
-npm run lint
-npm run typecheck
-npm test
+pnpm run build
+pnpm run lint
+pnpm run typecheck
+pnpm test
 ```
 
-`npm run lint` runs real ESLint and repository architecture checks. `npm test` runs Vitest domain/API contract tests and smoke tests.
+`pnpm run lint` runs real ESLint and repository architecture checks. `pnpm test` runs Vitest domain/API contract tests and smoke tests.
 
 ## Backend-ready architecture work
 
