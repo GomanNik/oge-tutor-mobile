@@ -60,7 +60,7 @@ describe('teacher student access UI', () => {
     expect(onBack).not.toHaveBeenCalled();
   });
 
-  it('shows refreshed access preview on the student access tab', async () => {
+  it('shows refreshed access preview from the student overview actions', async () => {
     const resendStudentInvite = vi.fn(async () => ({ invite: invitePreview }));
     render(React.createElement(StudentCard, {
       data: {
@@ -78,8 +78,7 @@ describe('teacher student access UI', () => {
       onBack: vi.fn(),
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Доступ' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Обновить приглашение' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить invite' }));
 
     await waitFor(() => expect(resendStudentInvite).toHaveBeenCalledWith('student-1'));
     expect(await screen.findByText('Ссылка приглашения обновлена.')).toBeTruthy();

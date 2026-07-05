@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import AccountSettingsScreen from './AccountSettingsScreen.jsx';
 import ProfileEditScreen from './ProfileEditScreen.jsx';
 import { ROLE_LABELS, getProfileIcon, normalizeProfile } from './profileOptions.js';
-import { Avatar, Badge, Button, RowCard, solidBg } from '../shared/ui.jsx';
+import { Avatar, Badge, Button, Header, RowCard, solidBg } from '../shared/ui.jsx';
 
 export default function ProfileScreen({ profile, role, onSaveVisual, onSaveAccount, onSaveSecurity, onSaveNotifications, onLogout }) {
   const [mode, setMode] = useState('view');
@@ -38,14 +38,15 @@ export default function ProfileScreen({ profile, role, onSaveVisual, onSaveAccou
 
   return (
     <>
-      <div className={`profile-hero ${solidBg(normalized.bg)}`}>
+      <Header title="Профиль" subtitle="Аккаунт, внешний вид и уведомления" />
+      <button type="button" className={`profile-hero profile-hero-button ${solidBg(normalized.bg)}`} onClick={() => setMode('edit')}>
         <div className="profile-content">
           <Avatar avatarId={normalized.avatar} bg={normalized.bg} size="lg" />
           <p className="profile-name">{normalized.name}</p>
           <p className="profile-email">{normalized.email}</p>
           <Badge tone="blue">{roleLabel}</Badge>
         </div>
-      </div>
+      </button>
 
       <div className="profile-action-list">
         <RowCard
@@ -55,7 +56,7 @@ export default function ProfileScreen({ profile, role, onSaveVisual, onSaveAccou
           onClick={() => setMode('edit')}
         />
         <RowCard
-          icon="⚙️"
+          icon="◎"
           title="Настройки аккаунта"
           subtitle="Email, пароль и уведомления"
           onClick={() => setMode('account')}

@@ -186,9 +186,9 @@ export function MaterialPicker({
 
         <div className="material-picker-tabs" role="tablist" aria-label="Источник материала">
           {[
-            ['library', '📚', 'Библиотека'],
-            ['file', '📄', 'Файл'],
-            ['link', '🔗', 'Ссылка'],
+            ['library', '▦', 'Библиотека'],
+            ['file', '↓', 'Файл'],
+            ['link', '↗', 'Ссылка'],
           ].map(([id, icon, label]) => (
             <button key={id} type="button" onClick={() => { setActiveTab(id); setMessage(''); }} className={cx('material-picker-tab', activeTab === id && 'active')}>
               <span>{icon}</span>
@@ -275,7 +275,7 @@ export function MaterialPicker({
                   setFileName(file?.name || '');
                 }}
               />
-              <span className="file-drop-icon" aria-hidden="true">📄</span>
+              <span className="file-drop-icon" aria-hidden="true">↓</span>
               <strong title={fileName || 'Выбрать файл'}>{fileName || 'Выбрать файл'}</strong>
               <span>Файл будет передан в API-слой и загружен backend через FormData.</span>
             </label>

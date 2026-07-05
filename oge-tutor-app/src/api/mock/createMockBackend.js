@@ -27,9 +27,9 @@ import { ApiError } from '../apiError.js';
 import { mapDataDto } from '../dto.js';
 import { TASKS } from '../../domain/tasks/index.js';
 
-const DB_KEY = 'oge-tutor-mock-backend-v6';
+const DB_KEY = 'oge-tutor-mock-backend-v7';
 const SESSION_KEY = 'oge-tutor-session-v6';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const KNOWN_TASK_NUMBERS = new Set(TASKS.map((task) => task.n));
 
@@ -1052,6 +1052,42 @@ export function createMockBackend() {
           title: normalizeText(payload.topicTitle) || `Задание ${taskNumber}`,
           files: [item],
         }, ...db.data.materials];
+      });
+    },
+
+    updateMaterialFile(topicId, fileId, payload = {}) {
+      return mutate((db, session) => {
+        requireTeacherSession(session);
+        const topic = db.data.materials.find((item) => item.id === topicId);
+        if (!topic) throw apiError('Тема материалов не найдена.', 'not_found', 404);
+        const current = topic.files.find((item) => item.id === fileId);
+        if (!current) throw apiError('Материал не найден.', 'not_found', 404);
+
+        const [taskNumber] = payload.taskNumber ? validateTaskNumbers([payload.taskNumber], { required: true }) : [topic.taskNumber];
+        let targetTopic = topic;
+        if (Number(taskNumber) !== Number(topic.taskNumber)) {
+          targetTopic = db.data.materials.find((item) => Number(item.taskNumber) === Number(taskNumber));
+          if (!targetTopic) {
+            targetTopic = { id: createId('m'), taskNumber, title: normalizeText(payload.topicTitle) || `Задание ${taskNumber}`, files: [] };
+            db.data.materials = [targetTopic, ...db.data.materials];
+          }
+          topic.files = topic.files.filter((item) => item.id !== fileId);
+        }
+
+        if (payload.topicTitle) targetTopic.title = normalizeText(payload.topicTitle);
+
+        const title = normalizeText(payload.title);
+        let next = { ...current };
+        if (payload.file || payload.fileId || payload.item?.fileId) {
+          next = { ...buildMaterialFromPayload({ ...payload, type: MATERIAL_TYPE.FILE, item: { ...(payload.item || {}), id: fileId, title: title || payload.fileName || current.title } }), id: fileId };
+        } else if (payload.type === MATERIAL_TYPE.LINK || payload.url) {
+          next = normalizeMaterialFile({ ...current, ...buildLinkMaterial(payload.url || current.url), id: fileId, title: title || current.title });
+        } else {
+          next = normalizeMaterialFile({ ...current, id: fileId, title: title || current.title });
+        }
+
+        const nextFiles = targetTopic.files.filter((item) => item.id !== fileId);
+        targetTopic.files = [next, ...nextFiles];
       });
     },
 

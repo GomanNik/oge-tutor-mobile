@@ -90,7 +90,7 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
 
   return (
     <>
-      <Header title="Настройки аккаунта" subtitle="Email, пароль и уведомления сохранены отдельными backend-действиями" onBack={onBack} />
+      <Header title="Настройки аккаунта" subtitle="Email, пароль, уведомления и выход из аккаунта" onBack={onBack} />
 
       <Section title="Email" />
       <Card className="form-stack">
@@ -105,7 +105,7 @@ export default function AccountSettingsScreen({ profile, role, onBack, onSaveAcc
         <Field label="Новый пароль" type="password" value={newPassword} onChange={setNewPassword} placeholder="Минимум 6 символов" />
         <Field label="Повторите новый пароль" type="password" value={repeatPassword} onChange={setRepeatPassword} placeholder="Повторите пароль" />
         <Button onClick={savePassword} disabled={isSaving}>{isSaving ? 'Сохраняем…' : 'Сохранить пароль'}</Button>
-        <p className="helper-text">Фронт не записывает passwordUpdatedAt и не хранит пароль в профиле. Это делает backend.</p>
+        <p className="helper-text">После смены пароля используйте новый пароль при следующем входе.</p>
       </Card>
 
       <Section title="Уведомления" />

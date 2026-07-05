@@ -66,14 +66,14 @@ export const NOTIFICATION_SETTINGS = {
   student: [
     {
       id: 'lessonReminders',
-      icon: '📅',
+      icon: '□',
       title: 'Напоминания об уроках',
       description: 'Перед ближайшим занятием',
       defaultEnabled: true,
     },
     {
       id: 'homeworkDeadlines',
-      icon: '📝',
+      icon: '✓',
       title: 'Дедлайны ДЗ',
       description: 'Когда срок сдачи близко',
       defaultEnabled: true,
@@ -87,7 +87,7 @@ export const NOTIFICATION_SETTINGS = {
     },
     {
       id: 'newMaterials',
-      icon: '📚',
+      icon: '▦',
       title: 'Новые материалы',
       description: 'Когда добавлены материалы к уроку или ДЗ',
       defaultEnabled: true,
@@ -96,14 +96,14 @@ export const NOTIFICATION_SETTINGS = {
   teacher: [
     {
       id: 'submittedSolutions',
-      icon: '📤',
+      icon: '↑',
       title: 'Новые решения',
       description: 'Когда ученик сдал домашнюю работу',
       defaultEnabled: true,
     },
     {
       id: 'lessonReminders',
-      icon: '📅',
+      icon: '□',
       title: 'Напоминания об уроках',
       description: 'Перед занятием по расписанию',
       defaultEnabled: true,
@@ -117,7 +117,7 @@ export const NOTIFICATION_SETTINGS = {
     },
     {
       id: 'studentAccessProblems',
-      icon: '🔐',
+      icon: '◎',
       title: 'Доступ учеников',
       description: 'Если ученик не установил пароль',
       defaultEnabled: true,

@@ -96,6 +96,17 @@ export function createHttpBackend(baseUrl) {
     return request('/materials', { method: 'POST', body: payload });
   }
 
+  async function updateMaterialPayload(topicId, fileId, payload = {}) {
+    const body = { ...payload };
+    if (isBrowserFile(payload.file)) {
+      const fileResource = await uploadFileResource(payload.file, { title: payload.fileName || payload.file.name, context: 'material-library-replace' });
+      body.fileId = fileResource.id;
+      body.item = attachmentFromFileResource(payload.item || { title: payload.title || payload.fileName }, fileResource);
+      delete body.file;
+    }
+    return request(`/materials/${topicId}/files/${fileId}`, { method: 'PATCH', body });
+  }
+
 
   function extractFileResource(result, _fallbackFile) {
     const candidate = result?.fileResource || result?.file || result?.resource || result?.data?.fileResource || result?.data?.file || (result?.id ? result : null);
@@ -209,6 +220,7 @@ export function createHttpBackend(baseUrl) {
     reviewHomework: async (homeworkId, payload) => request(`/homeworks/${homeworkId}/review`, { method: 'POST', body: await resolvePayloadAttachments(payload, ['reviewMaterials'], 'homework-review') }),
 
     addMaterial: uploadMaterialPayload,
+    updateMaterialFile: updateMaterialPayload,
     removeMaterialFile: (topicId, fileId) => request(`/materials/${topicId}/files/${fileId}`, { method: 'DELETE' }),
   };
 }

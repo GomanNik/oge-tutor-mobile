@@ -217,6 +217,7 @@ export function useBackendStore() {
     resendStudentInvite: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESEND_INVITE)),
     resetStudentPassword: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.RESET_PASSWORD)),
     disableStudentAccess: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.DISABLE)),
+    enableStudentAccess: (studentId) => run(() => api.updateStudentAccess(studentId, STUDENT_ACCESS_ACTION.ENABLE)),
 
     createLesson: (payload) => run(() => api.createLesson(payload)),
     updateLesson: (lessonId, patch) => run(() => api.updateLesson(lessonId, patch)),
@@ -228,6 +229,7 @@ export function useBackendStore() {
     reviewHomework: (homeworkId, payload) => run(() => api.reviewHomework(homeworkId, payload)),
 
     addMaterial: (payload) => run(() => api.addMaterial(payload)),
+    updateMaterialFile: (topicId, fileId, payload) => run(() => api.updateMaterialFile(topicId, fileId, payload)),
     removeMaterialFile: (topicId, fileId) => run(() => api.removeMaterialFile(topicId, fileId)),
   }), [api, run]);
 

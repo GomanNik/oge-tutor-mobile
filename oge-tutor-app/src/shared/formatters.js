@@ -130,9 +130,9 @@ export function materialTypeLabel(type) {
 }
 
 export function materialIcon(type) {
-  if (type === MATERIAL_TYPE.LINK) return '🔗';
-  if (type === MATERIAL_TYPE.LIBRARY) return '📚';
-  return '📄';
+  if (type === MATERIAL_TYPE.LINK) return '↗';
+  if (type === MATERIAL_TYPE.LIBRARY) return '▦';
+  return '↓';
 }
 
 export function materialDisplayTitle(material) {
@@ -144,9 +144,28 @@ export function materialSourceText(material) {
 
   if (material?.taskNumber) parts.push(`задание ${material.taskNumber}`);
   if (material?.topicTitle) parts.push(material.topicTitle);
-  parts.push(material?.source || materialTypeLabel(material?.type));
+  const sourceLabel = material?.source === MATERIAL_SOURCE.UPLOAD
+    ? materialTypeLabel(MATERIAL_TYPE.FILE)
+    : material?.source === MATERIAL_SOURCE.LINK
+      ? materialTypeLabel(MATERIAL_TYPE.LINK)
+      : material?.source === MATERIAL_SOURCE.LIBRARY
+        ? materialTypeLabel(MATERIAL_TYPE.LIBRARY)
+        : materialTypeLabel(material?.type);
+  parts.push(sourceLabel);
 
   return parts.filter(Boolean).join(' · ');
+}
+
+export function materialActionLabel(material) {
+  if (material?.type === MATERIAL_TYPE.LINK) return 'Открыть';
+  if (material?.type === MATERIAL_TYPE.FILE || material?.fileId || material?.originalName) return 'Скачать';
+  return 'Открыть';
+}
+
+export function materialKindLabel(material) {
+  if (material?.type === MATERIAL_TYPE.LINK) return 'Ссылка';
+  if (material?.type === MATERIAL_TYPE.LIBRARY) return 'Из библиотеки';
+  return 'Файл';
 }
 
 export function materialKey(material) {

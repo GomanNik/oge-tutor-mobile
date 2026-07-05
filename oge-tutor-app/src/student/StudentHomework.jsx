@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import { HOMEWORK_STATUS, statusLabel } from '../api/contracts.js';
 import { formatDateLabel, formatDateTimeLabel } from '../shared/dateTime.js';
-import { Badge, Button, Card, Field, Header, MaterialList, RowCard, Section, iconByStatus, toneByStatus } from '../shared/ui.jsx';
+import { Badge, Button, Card, EmptyState, Field, Header, MaterialList, RowCard, Section, iconByStatus, toneByStatus } from '../shared/ui.jsx';
 
 function homeworkDueLabel(homework) {
   return formatDateLabel(homework?.dueAt || homework?.deadline, 'дедлайн не указан');
@@ -19,7 +19,7 @@ export function StudentHomeworkList({ homeworks, openHomework }) {
   return (
     <>
       <Header title="Домашние задания" subtitle="Задания, дедлайны и загрузка решений" />
-      {homeworks.map((hw) => <RowCard key={hw.id} icon={iconByStatus(hw.status)} iconTone={toneByStatus(hw.status)} title={hw.title} subtitle={`${hw.topic} · ${homeworkDueLabel(hw)}`} badge={hw.status} badgeTone={toneByStatus(hw.status)} onClick={() => openHomework(hw.id)} />)}
+      {homeworks.length ? homeworks.map((hw) => <RowCard key={hw.id} icon={iconByStatus(hw.status)} iconTone={toneByStatus(hw.status)} title={hw.title} subtitle={`${hw.topic} · ${homeworkDueLabel(hw)}`} badge={hw.status} badgeTone={toneByStatus(hw.status)} onClick={() => openHomework(hw.id)} />) : <EmptyState title="Домашних заданий нет" text="Когда преподаватель выдаст ДЗ, оно появится здесь с дедлайном и материалами." />}
     </>
   );
 }
@@ -98,7 +98,7 @@ export function StudentHomeworkDetail({ homework, onBack, onSubmit }) {
       <Section title="Решение" />
       <Card className="form-stack">
         {homework.solutionFile ? (
-          <div className="file-row"><div className="file-name">📄 {homework.solutionFile}</div><div className="file-source">последняя отправка {homework.submittedAt ? formatDateTimeLabel(homework.submittedAt) : ''}</div></div>
+          <div className="file-row"><div className="file-name">Файл: {homework.solutionFile}</div><div className="file-source">последняя отправка {homework.submittedAt ? formatDateTimeLabel(homework.submittedAt) : ''}</div></div>
         ) : (
           <div className="file-row" style={{ justifyContent: 'center', color: 'var(--blue)' }}>Решение ещё не загружено</div>
         )}
@@ -111,7 +111,7 @@ export function StudentHomeworkDetail({ homework, onBack, onSubmit }) {
                 setFile(nextFile);
                 setFileTitle(nextFile?.name || '');
               }} />
-              <span className="file-drop-icon">📄</span>
+              <span className="file-drop-icon">↓</span>
               <strong>{fileTitle || 'Выбрать файл решения'}</strong>
               <span>Файл будет передан в API через FormData.</span>
             </label>
@@ -130,7 +130,7 @@ export function StudentHomeworkDetail({ homework, onBack, onSubmit }) {
         {attempts.length ? attempts.map((attempt, index) => (
           <div className="file-row" key={attempt.id || `${attemptFileTitle(attempt)}-${index}`}>
             <div>
-              <div className="file-name">📄 {attemptFileTitle(attempt)}</div>
+              <div className="file-name">Файл: {attemptFileTitle(attempt)}</div>
               <div className="file-source">{formatDateTimeLabel(attempt.submittedAt)} · {statusLabel(attempt.reviewStatus || HOMEWORK_STATUS.SUBMITTED)}</div>
             </div>
           </div>

@@ -78,6 +78,13 @@ export const FILE_UPLOAD_STATUS = Object.freeze({
 
 export const NOTIFICATION_TYPE = Object.freeze({
   PROGRESS_ASSESSMENT_REQUIRED: 'progress_assessment_required',
+  HOMEWORK_SUBMITTED: 'homework_submitted',
+  HOMEWORK_OVERDUE: 'homework_overdue',
+  UPCOMING_LESSON: 'upcoming_lesson',
+  STUDENT_ACCESS: 'student_access',
+  HOMEWORK_ASSIGNED: 'homework_assigned',
+  HOMEWORK_REVIEWED: 'homework_reviewed',
+  NEW_MATERIAL: 'new_material',
 });
 
 export const NOTIFICATION_STATUS = Object.freeze({
@@ -104,9 +111,11 @@ export const ACCOUNT_SETTING_SCOPE = Object.freeze({
 export const TEACHER_ROUTE = Object.freeze({
   HOME: 'teacher.home',
   STUDENTS: 'teacher.students',
-  LESSONS: 'teacher.lessons',
+  SCHEDULE: 'teacher.schedule',
+  LESSONS: 'teacher.schedule',
   HOMEWORK: 'teacher.homework',
   MATERIALS: 'teacher.materials',
+  NOTIFICATIONS: 'teacher.notifications',
   PROFILE: 'teacher.profile',
 });
 
@@ -116,15 +125,17 @@ export const STUDENT_ROUTE = Object.freeze({
   LESSONS: 'student.lessons',
   MATERIALS: 'student.materials',
   PROGRESS: 'student.progress',
+  NOTIFICATIONS: 'student.notifications',
   PROFILE: 'student.profile',
 });
 
 export const TEACHER_ROUTE_LABELS = Object.freeze({
   [TEACHER_ROUTE.HOME]: 'Главная',
   [TEACHER_ROUTE.STUDENTS]: 'Ученики',
-  [TEACHER_ROUTE.LESSONS]: 'Уроки',
+  [TEACHER_ROUTE.SCHEDULE]: 'Расписание',
   [TEACHER_ROUTE.HOMEWORK]: 'ДЗ',
   [TEACHER_ROUTE.MATERIALS]: 'Материалы',
+  [TEACHER_ROUTE.NOTIFICATIONS]: 'Уведомления',
   [TEACHER_ROUTE.PROFILE]: 'Профиль',
 });
 
@@ -134,6 +145,7 @@ export const STUDENT_ROUTE_LABELS = Object.freeze({
   [STUDENT_ROUTE.LESSONS]: 'Уроки',
   [STUDENT_ROUTE.MATERIALS]: 'Материалы',
   [STUDENT_ROUTE.PROGRESS]: 'Прогресс',
+  [STUDENT_ROUTE.NOTIFICATIONS]: 'Уведомления',
   [STUDENT_ROUTE.PROFILE]: 'Профиль',
 });
 
@@ -226,7 +238,7 @@ export function statusTone(status) {
 export function statusIcon(status) {
   const normalizedHomework = normalizeHomeworkStatus(status);
   if (normalizedHomework === HOMEWORK_STATUS.REVIEWED) return '✓';
-  if (normalizedHomework === HOMEWORK_STATUS.SUBMITTED) return '📤';
+  if (normalizedHomework === HOMEWORK_STATUS.SUBMITTED) return '↑';
   if (normalizedHomework === HOMEWORK_STATUS.OVERDUE) return '!';
   if (normalizedHomework === HOMEWORK_STATUS.NEEDS_REVISION) return '↻';
 
@@ -235,5 +247,5 @@ export function statusIcon(status) {
   if (normalizedLesson === LESSON_STATUS.CANCELED) return '×';
   if (normalizedLesson === LESSON_STATUS.RESCHEDULED) return '↻';
 
-  return '📝';
+  return '•';
 }

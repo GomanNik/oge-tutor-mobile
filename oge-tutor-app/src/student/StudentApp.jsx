@@ -5,8 +5,10 @@
 import React, { useState } from 'react';
 import { STUDENT_ROUTE } from '../api/contracts.js';
 import { AppShell, Card } from '../shared/ui.jsx';
+import { NotificationInbox } from '../shared/NotificationsScreen.jsx';
 import { STUDENT_NAV_ITEMS } from '../shared/constants.js';
 import { selectStudent, selectStudentHomeworks, selectStudentLessons } from '../app/selectors.js';
+import { deriveStudentNotifications } from '../domain/productSelectors.js';
 import StudentHome from './StudentHome.jsx';
 import { StudentHomeworkDetail, StudentHomeworkList } from './StudentHomework.jsx';
 import { StudentLessonDetail, StudentLessons } from './StudentLessons.jsx';
@@ -29,6 +31,7 @@ export default function StudentApp({ data, actions, user, onLogout }) {
 
   const homeworks = selectStudentHomeworks(data, student.id);
   const lessons = selectStudentLessons(data, student.id);
+  const notifications = deriveStudentNotifications({ student, lessons, homeworks, materials: data.materials, notifications: data.notifications });
 
   function navigate(next) {
     setScreen(next);
@@ -37,6 +40,23 @@ export default function StudentApp({ data, actions, user, onLogout }) {
     setLessonId(null);
     setWeakTask(null);
     setReturnWeakTask(null);
+  }
+
+  function openNotification(item) {
+    if (item.homeworkId) {
+      setHomeworkId(item.homeworkId);
+      setScreen(STUDENT_ROUTE.HOMEWORK);
+      return;
+    }
+    if (item.lessonId) {
+      setLessonId(item.lessonId);
+      setScreen(STUDENT_ROUTE.LESSONS);
+      return;
+    }
+    if (item.topicId) {
+      setTopicId(item.topicId);
+      setScreen(STUDENT_ROUTE.MATERIALS);
+    }
   }
 
   function updateStudent(patch) {
@@ -48,7 +68,23 @@ export default function StudentApp({ data, actions, user, onLogout }) {
   }
 
   return (
-    <AppShell navItems={STUDENT_NAV_ITEMS} active={screen} onNavigate={navigate}>
+    <AppShell
+      navItems={STUDENT_NAV_ITEMS}
+      active={screen === STUDENT_ROUTE.NOTIFICATIONS ? STUDENT_ROUTE.HOME : screen}
+      onNavigate={navigate}
+      topTitle="Ученик"
+      noticeCount={notifications.length}
+      onOpenNotifications={() => navigate(STUDENT_ROUTE.NOTIFICATIONS)}
+    >
+      {screen === STUDENT_ROUTE.NOTIFICATIONS && (
+        <NotificationInbox
+          title="Уведомления"
+          subtitle="ДЗ, проверки, материалы и ближайшие уроки"
+          notifications={notifications}
+          onBack={() => navigate(STUDENT_ROUTE.HOME)}
+          onOpen={openNotification}
+        />
+      )}
       {screen === STUDENT_ROUTE.HOME && <StudentHome student={student} lessons={lessons} homeworks={homeworks} onNavigate={navigate} openWeakTask={(n) => { setWeakTask(n); setScreen(STUDENT_ROUTE.PROGRESS); }} />}
       {screen === STUDENT_ROUTE.HOMEWORK && !homeworkId && <StudentHomeworkList homeworks={homeworks} openHomework={setHomeworkId} />}
       {screen === STUDENT_ROUTE.HOMEWORK && homeworkId && <StudentHomeworkDetail homework={homeworks.find((item) => item.id === homeworkId)} onBack={() => { if (returnWeakTask) { setHomeworkId(null); setWeakTask(returnWeakTask); setReturnWeakTask(null); setScreen(STUDENT_ROUTE.PROGRESS); } else { setHomeworkId(null); } }} onSubmit={submitHomework} />}

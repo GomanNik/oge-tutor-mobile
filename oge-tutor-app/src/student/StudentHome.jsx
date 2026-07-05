@@ -114,7 +114,7 @@ function PreparationCard({ progress, weakTasks, homeworks, openProgress, openWea
             ))}
           </div>
         ) : (
-          <div className="inline-note success">Слабых заданий сейчас нет. Продолжай поддерживать темп.</div>
+          <div className="inline-note success">Слабых заданий сейчас нет. Можно поддерживать темп текущими ДЗ и повторением.</div>
         )}
 
         <button type="button" className="btn btn-soft repeat-cta" onClick={() => firstWeakTask ? openWeakTask(firstWeakTask.n) : openProgress()}>
@@ -135,7 +135,7 @@ export default function StudentHome({ student, lessons, homeworks, onNavigate, o
       <div className="home-hero">
         <div className="home-hero-main">
           <h1 className="title">Привет, {getFirstName(student.name)}</h1>
-          <p className="subtitle">Сегодня — урок, ДЗ и короткое повторение слабых номеров.</p>
+          <p className="subtitle">{nearestLesson || activeHomework ? 'План на день собран из расписания, ДЗ и прогресса.' : 'Сегодня нет срочных действий. Можно открыть материалы или прогресс.'}</p>
         </div>
         <Avatar avatarId={student.avatar} bg={student.bg} size="md" />
       </div>
@@ -149,7 +149,7 @@ export default function StudentHome({ student, lessons, homeworks, onNavigate, o
         </div>
         <div className="today-grid">
           <TodayAction
-            icon="📅"
+            icon="□"
             title="Урок"
             value={nearestLesson ? formatTimeLabel(nearestLesson.startAt) : '—'}
             subtitle={nearestLesson ? nearestLesson.topic : 'Пока нет запланированных уроков'}
@@ -158,7 +158,7 @@ export default function StudentHome({ student, lessons, homeworks, onNavigate, o
             onClick={() => onNavigate(STUDENT_ROUTE.LESSONS)}
           />
           <TodayAction
-            icon="📝"
+            icon="✓"
             title="ДЗ"
             value={activeHomework ? formatDateLabel(activeHomework.dueAt || activeHomework.deadline) : '—'}
             subtitle={activeHomework ? activeHomework.title : 'Пока нет активных заданий'}

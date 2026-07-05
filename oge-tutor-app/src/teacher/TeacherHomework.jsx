@@ -74,8 +74,16 @@ export function HomeworkList({ data, openCreate, openHomework }) {
   );
 }
 
-export function CreateHomework({ data, actions, onBack }) {
-  const [form, setForm] = useState({ studentId: '', title: '', taskNumbers: '', dueDate: '', description: '', materials: [] });
+export function CreateHomework({ data, actions, context = {}, onBack }) {
+  const [form, setForm] = useState({
+    studentId: context.studentId || '',
+    lessonId: context.lessonId || '',
+    title: context.title || '',
+    taskNumbers: Array.isArray(context.taskNumbers) ? context.taskNumbers.join(', ') : (context.taskNumbers || ''),
+    dueDate: context.dueDate || '',
+    description: context.description || '',
+    materials: context.materials || [],
+  });
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -126,6 +134,8 @@ export function CreateHomework({ data, actions, onBack }) {
       <Header title="Выдать ДЗ" subtitle="Домашка содержит задание, дедлайн и связанные материалы" onBack={onBack} />
       <Card className="form-stack">
         {error ? <div className="inline-error">{error}</div> : null}
+        {context.studentId ? <div className="inline-note success">Ученик выбран из контекста: {getStudent(data, context.studentId)?.name || 'ученик'}.</div> : null}
+        {context.lessonId ? <div className="inline-note success">ДЗ создаётся по уроку. Ученик и номера ОГЭ уже подставлены.</div> : null}
         <SelectField label="Ученик" value={form.studentId} onChange={(studentId) => setForm({ ...form, studentId })} options={[{ value: '', label: 'Выберите ученика' }, ...data.students.map((s) => ({ value: s.id, label: s.name }))]} />
         <Field label="Название" value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Вариант 7: задания 1–5" />
         <Field label="Номера заданий" value={form.taskNumbers} onChange={(taskNumbers) => setForm({ ...form, taskNumbers })} placeholder="1, 2, 3" />
@@ -134,6 +144,13 @@ export function CreateHomework({ data, actions, onBack }) {
       </Card>
       <Section title="Связанные материалы" />
       <AttachmentPicker materials={data.materials} value={form.materials} onChange={(materials) => setForm({ ...form, materials })} title="Прикрепить к домашке" suggestedTaskNumbers={parseTaskNumbers(form.taskNumbers)} />
+      <Section title="Предпросмотр выдачи" />
+      <Card className={canCreate ? 'card-green-soft' : 'card-amber-soft'}>
+        <strong>{form.title.trim() || 'Название ДЗ не указано'}</strong>
+        <p className="subtitle">Ученик: {getStudent(data, form.studentId)?.name || 'не выбран'} · задания: {parseTaskNumbers(form.taskNumbers).join(', ') || 'не указаны'} · дедлайн: {form.dueDate || 'не указан'}</p>
+        <p className="subtitle">{form.description.trim() || 'Описание можно добавить перед выдачей.'}</p>
+        <p className="subtitle">{formatMaterialCount(form.materials.length)}</p>
+      </Card>
       <div style={{ marginTop: 14 }}><Button onClick={submit} disabled={!canCreate || isSaving}>{isSaving ? 'Выдаём…' : 'Выдать ДЗ'}</Button></div>
     </>
   );
@@ -253,7 +270,7 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
             <strong>{homework.title}</strong>
             <p className="subtitle">Последняя отправка: {formatDateTimeLabel(latestAttempt?.submittedAt || homework.submittedAt)}</p>
           </div>
-          <div className="file-row"><div className="file-name">📄 {homework.solutionFile || 'Решение не загружено'}</div></div>
+          <div className="file-row"><div className="file-name">Файл: {homework.solutionFile || 'Решение не загружено'}</div></div>
         </Card>
         <Section title="Комментарий" />
         <Card className="form-stack">
@@ -290,7 +307,7 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
         <p className="subtitle">{homework.description || 'Описание не добавлено.'}</p>
         <div className="file-row">
           <div>
-            <div className="file-name">📄 {homework.solutionFile || 'Решение не загружено'}</div>
+            <div className="file-name">Файл: {homework.solutionFile || 'Решение не загружено'}</div>
             <div className="file-source">{homework.submittedAt ? `отправлено ${formatDateTimeLabel(homework.submittedAt)}` : 'ожидается от ученика'}</div>
           </div>
         </div>
@@ -314,7 +331,7 @@ export function HomeworkDetail({ data, actions, homeworkId, onBack }) {
         {attempts.length ? attempts.map((attempt, index) => (
           <div className="file-row" key={attempt.id || `${fileTitleFromAttempt(attempt)}-${index}`}>
             <div>
-              <div className="file-name">📄 {fileTitleFromAttempt(attempt)}</div>
+              <div className="file-name">Файл: {fileTitleFromAttempt(attempt)}</div>
               <div className="file-source">{formatDateTimeLabel(attempt.submittedAt)} · {statusLabel(attempt.reviewStatus || HOMEWORK_STATUS.SUBMITTED)}</div>
             </div>
           </div>

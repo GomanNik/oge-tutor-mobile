@@ -70,4 +70,67 @@ export class MaterialsService {
     if (!item) throw notFound('Материал не найден.');
     await this.prisma.materialAttachment.delete({ where: { id: fileId } });
   }
+
+  async updateFile(user: AuthUser, topicId: string, fileId: string, payload: any) {
+    const teacherId = this.assertTeacher(user);
+    const topic = await this.prisma.materialTopic.findFirst({ where: { id: topicId, teacherId } });
+    if (!topic) throw notFound('Тема материалов не найдена.');
+
+    const item = await this.prisma.materialAttachment.findFirst({ where: { id: fileId, topicId } });
+    if (!item) throw notFound('Материал не найден.');
+
+    const taskNumber = payload.taskNumber === undefined ? topic.taskNumber : parseTaskNumbers([payload.taskNumber], 'taskNumber')[0];
+    const topicTitle = cleanText(payload.topicTitle) || topic.title;
+    const targetTopic = taskNumber === topic.taskNumber
+      ? await this.prisma.materialTopic.update({ where: { id: topic.id }, data: { title: topicTitle } })
+      : await this.prisma.materialTopic.upsert({
+        where: { teacherId_taskNumber: { teacherId, taskNumber } },
+        create: { teacherId, taskNumber, title: topicTitle || `Задание ${taskNumber}` },
+        update: payload.topicTitle !== undefined ? { title: topicTitle } : {},
+      });
+
+    const title = cleanText(payload.title) || item.title;
+    const type = payload.type || item.type;
+    const data: any = {
+      topicId: targetTopic.id,
+      title,
+    };
+
+    if (payload.fileId) {
+      const file = await this.files.requireAttachableFile(user, payload.fileId);
+      await this.files.markFileScope(file.id, FILE_SCOPE.TEACHER_MATERIAL);
+      Object.assign(data, {
+        type: MATERIAL_TYPE.FILE,
+        source: MATERIAL_SOURCE.UPLOAD,
+        url: file.url,
+        fileId: file.id,
+        originalName: file.originalName,
+        fileName: file.originalName,
+        mimeType: file.mimeType,
+        size: file.size,
+        uploadedAt: file.uploadedAt,
+      });
+    } else if (type === MATERIAL_TYPE.LINK || payload.url !== undefined) {
+      const url = requireText(payload.url ?? item.url, 'url');
+      Object.assign(data, {
+        type: MATERIAL_TYPE.LINK,
+        source: MATERIAL_SOURCE.LINK,
+        url,
+        fileId: null,
+        originalName: '',
+        fileName: '',
+        mimeType: '',
+        size: 0,
+        uploadedAt: null,
+      });
+    } else if (type === MATERIAL_TYPE.LIBRARY) {
+      Object.assign(data, {
+        type: MATERIAL_TYPE.LIBRARY,
+        source: MATERIAL_SOURCE.LIBRARY,
+        url: cleanText(payload.url ?? item.url),
+      });
+    }
+
+    return this.prisma.materialAttachment.update({ where: { id: fileId }, data });
+  }
 }

@@ -6,21 +6,21 @@ import React from 'react';
 import { getStoredApiToken } from '../api/authToken.js';
 import { STUDENT_ROUTE_LABELS, TEACHER_ROUTE_LABELS, statusIcon, statusLabel, statusTone } from '../api/contracts.js';
 import { getAvatarIcon } from './avatarCatalog.js';
-import { materialDisplayTitle, materialIcon, materialSourceText } from './formatters.js';
+import { materialActionLabel, materialDisplayTitle, materialIcon, materialKindLabel, materialSourceText } from './formatters.js';
 
 export const NAV_ICONS = {
-  'teacher.home': '🏠',
-  'teacher.students': '👥',
-  'teacher.lessons': '📅',
-  'teacher.homework': '📝',
-  'teacher.materials': '📚',
-  'teacher.profile': '👤',
-  'student.home': '🏠',
-  'student.homework': '📝',
-  'student.lessons': '📅',
-  'student.materials': '📚',
+  'teacher.home': '⌂',
+  'teacher.students': '◉',
+  'teacher.schedule': '□',
+  'teacher.homework': '✓',
+  'teacher.materials': '▦',
+  'teacher.profile': '◎',
+  'student.home': '⌂',
+  'student.homework': '✓',
+  'student.lessons': '□',
+  'student.materials': '▦',
   'student.progress': '▦',
-  'student.profile': '👤',
+  'student.profile': '◎',
 };
 
 export function navLabel(item) {
@@ -40,9 +40,21 @@ export function MobileFrame({ children }) {
   );
 }
 
-export function AppShell({ navItems, active, onNavigate, children }) {
+export function AppShell({ navItems, active, onNavigate, children, topTitle = 'Кабинет ОГЭ', noticeCount = 0, onOpenNotifications }) {
   return (
     <div className="app-shell">
+      <div className="shell-topbar">
+        <div>
+          <div className="shell-kicker">OGE Tutor</div>
+          <div className="shell-title">{topTitle}</div>
+        </div>
+        {onOpenNotifications ? (
+          <button type="button" className="notice-btn" onClick={onOpenNotifications} aria-label="Открыть уведомления">
+            <span aria-hidden="true">!</span>
+            {noticeCount ? <strong>{noticeCount > 9 ? '9+' : noticeCount}</strong> : null}
+          </button>
+        ) : null}
+      </div>
       <main className="screen-scroll">{children}</main>
       <nav className="bottom-nav" aria-label="Основная навигация">
         {navItems.map((item) => (
@@ -97,6 +109,14 @@ export function Section({ title, action, onAction }) {
 
 export function Button({ children, variant = 'primary', onClick, type = 'button', disabled }) {
   return <button type={type} disabled={disabled} onClick={onClick} className={cx('btn', `btn-${variant}`)}>{children}</button>;
+}
+
+export function IconButton({ label, icon, onClick, disabled, tone = 'blue' }) {
+  return (
+    <button type="button" className={cx('icon-btn', `icon-btn-${tone}`)} onClick={onClick} disabled={disabled} title={label} aria-label={label}>
+      <span aria-hidden="true">{icon}</span>
+    </button>
+  );
 }
 
 export function Field({ label, value, onChange, placeholder, type = 'text', disabled }) {
@@ -161,7 +181,7 @@ export function solidBg(bg) {
 
 export function Avatar({ avatarId = 'bear', bg = 'blue', size = 'md' }) {
   const avatar = getAvatarIcon(avatarId);
-  return <div className={cx('avatar', `avatar-${size}`, toneClass(bg))}>{avatar?.icon || '👤'}</div>;
+  return <div className={cx('avatar', `avatar-${size}`, toneClass(bg))}>{avatar?.icon || '◎'}</div>;
 }
 
 export function RowCard({ icon, iconTone = 'blue', title, subtitle, badge, badgeTone = 'blue', onClick }) {
@@ -206,12 +226,12 @@ export function MaterialList({ items = [], onRemove, compact = false }) {
           <div className={cx('material-preview-icon', `material-${item.type || 'file'}`)}>{materialIcon(item.type)}</div>
           <div className="material-preview-main">
             <div className="material-preview-title" title={materialDisplayTitle(item)}>{materialDisplayTitle(item)}</div>
-            <div className="material-preview-source" title={`${materialSourceText(item)}${item.url ? ` · ${item.url}` : ''}`}>{materialSourceText(item)}{item.url ? ` · ${item.url}` : ''}</div>
+            <div className="material-preview-source" title={materialSourceText(item)}>{materialKindLabel(item)} · {materialSourceText(item)}</div>
           </div>
           {onRemove ? (
             <button type="button" className="material-remove-btn" onClick={() => onRemove(index)}>Убрать</button>
           ) : item.url ? (
-            <a className="material-open-btn" href={item.url} target="_blank" rel="noreferrer" onClick={(event) => openMaterial(event, item)}>Открыть</a>
+            <a className="material-open-btn" href={item.url} target="_blank" rel="noreferrer" onClick={(event) => openMaterial(event, item)}>{materialActionLabel(item)}</a>
           ) : null}
         </div>
       ))}
@@ -221,11 +241,12 @@ export function MaterialList({ items = [], onRemove, compact = false }) {
 
 
 
-export function EmptyState({ title, text }) {
+export function EmptyState({ title, text, action, onAction }) {
   return (
-    <Card>
+    <Card className="empty-state">
       <strong>{title}</strong>
       <p className="subtitle">{text}</p>
+      {action ? <Button variant="soft" onClick={onAction}>{action}</Button> : null}
     </Card>
   );
 }

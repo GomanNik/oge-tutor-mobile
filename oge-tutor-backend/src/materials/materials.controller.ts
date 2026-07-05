@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Patch, Post } from '@nestjs/common';
 import { CurrentUser, AuthUser } from '../common/current-user';
 import { Roles } from '../common/role.guard';
 import { ROLE } from '../common/contracts';
 import { MaterialsService } from './materials.service';
 import { BootstrapService } from '../bootstrap/bootstrap.service';
-import { AddMaterialDto } from './materials.dto';
+import { AddMaterialDto, UpdateMaterialFileDto } from './materials.dto';
 
 @Roles(ROLE.TEACHER)
 @Controller('materials')
@@ -20,6 +20,12 @@ export class MaterialsController {
   @Delete(':topicId/files/:fileId')
   async remove(@CurrentUser() user: AuthUser, @Param('topicId') topicId: string, @Param('fileId') fileId: string) {
     await this.materials.removeFile(user, topicId, fileId);
+    return { data: await this.bootstrap.buildForUser(user.id) };
+  }
+
+  @Patch(':topicId/files/:fileId')
+  async update(@CurrentUser() user: AuthUser, @Param('topicId') topicId: string, @Param('fileId') fileId: string, @Body() body: UpdateMaterialFileDto) {
+    await this.materials.updateFile(user, topicId, fileId, body);
     return { data: await this.bootstrap.buildForUser(user.id) };
   }
 }

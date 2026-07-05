@@ -3,7 +3,7 @@
  * Lesson forms validate schedule, timezone, duration, task numbers and same-student conflicts before API calls.
  */
 import React, { useState } from 'react';
-import { LESSON_SOURCE, LESSON_STATUS, statusLabel } from '../api/contracts.js';
+import { LESSON_SOURCE, LESSON_STATUS, TEACHER_ROUTE, statusLabel } from '../api/contracts.js';
 import { AttachmentPicker } from '../shared/attachments.jsx';
 import { selectLesson, selectStudent } from '../app/selectors.js';
 import { ACTIVE_LESSON_STATUSES, HISTORY_LESSON_STATUSES } from '../shared/constants.js';
@@ -19,7 +19,8 @@ import {
   timeInputValue,
 } from '../shared/dateTime.js';
 import { formatMaterialCount, parseTaskNumberInput } from '../shared/formatters.js';
-import { Badge, Button, Card, Field, Header, MaterialList, RowCard, Section, SelectField, TextArea, iconByStatus, toneByStatus } from '../shared/ui.jsx';
+import { Badge, Button, Card, EmptyState, Field, Header, MaterialList, RowCard, Section, SelectField, TextArea, cx, iconByStatus, toneByStatus } from '../shared/ui.jsx';
+import { isSameDayIso, isWithinNextDaysIso } from '../domain/productSelectors.js';
 
 const getStudent = selectStudent;
 const getLesson = selectLesson;
@@ -101,29 +102,88 @@ function validateLessonForm(form, data, { excludeLessonId = '', allowPast = fals
   return { error: '', schedule, taskNumbers: tasks.taskNumbers };
 }
 
-export function LessonsList({ data, openCreate, openLesson }) {
-  const planned = data.lessons.filter((item) => ACTIVE_LESSON_STATUSES.includes(item.status));
-  const history = data.lessons.filter((item) => HISTORY_LESSON_STATUSES.includes(item.status));
+export function ScheduleScreen({ data, openCreate, openLesson }) {
+  const [view, setView] = useState('week');
+  const [studentFilter, setStudentFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('active');
+  const baseList = [...data.lessons].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
+  const now = new Date();
+  const filtered = baseList.filter((lesson) => {
+    if (studentFilter !== 'all' && lesson.studentId !== studentFilter) return false;
+    if (statusFilter === 'active' && !ACTIVE_LESSON_STATUSES.includes(lesson.status)) return false;
+    if (statusFilter === 'history' && !HISTORY_LESSON_STATUSES.includes(lesson.status)) return false;
+    if (statusFilter !== 'all' && statusFilter !== 'active' && statusFilter !== 'history' && lesson.status !== statusFilter) return false;
+    if (view === 'day') return isSameDayIso(lesson.startAt, now);
+    if (view === 'week') return isWithinNextDaysIso(lesson.startAt, 7, now);
+    return true;
+  });
 
   return (
     <>
-      <Header title="Уроки" subtitle="Расписание преподавателя и материалы к занятиям" />
-      <Button onClick={openCreate}>Создать урок</Button>
-      <Section title="Ближайшие уроки" />
-      {planned.length ? planned.map((lesson) => {
+      <Header title="Расписание" subtitle="День, неделя, список занятий и действия по урокам" />
+      <Button onClick={() => openCreate()}>Создать урок</Button>
+
+      <div className="tab-row">
+        {[
+          ['day', 'День'],
+          ['week', 'Неделя'],
+          ['list', 'Список'],
+        ].map(([id, label]) => (
+          <button type="button" key={id} className={cx('tab-btn', view === id && 'active')} onClick={() => setView(id)}>{label}</button>
+        ))}
+      </div>
+
+      <Card className="schedule-filter-card">
+        <SelectField
+          label="Ученик"
+          value={studentFilter}
+          onChange={setStudentFilter}
+          options={[{ value: 'all', label: 'Все ученики' }, ...data.students.map((student) => ({ value: student.id, label: student.name }))]}
+        />
+        <SelectField
+          label="Статус"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: 'active', label: 'Ближайшие' },
+            { value: 'all', label: 'Все' },
+            { value: LESSON_STATUS.PLANNED, label: statusLabel(LESSON_STATUS.PLANNED) },
+            { value: LESSON_STATUS.RESCHEDULED, label: statusLabel(LESSON_STATUS.RESCHEDULED) },
+            { value: 'history', label: 'История' },
+            { value: LESSON_STATUS.COMPLETED, label: statusLabel(LESSON_STATUS.COMPLETED) },
+            { value: LESSON_STATUS.CANCELED, label: statusLabel(LESSON_STATUS.CANCELED) },
+          ]}
+        />
+      </Card>
+
+      <Section title={view === 'day' ? 'Занятия сегодня' : view === 'week' ? 'Ближайшая неделя' : 'Все занятия'} />
+      {filtered.length ? filtered.map((lesson) => {
         const student = getStudent(data, lesson.studentId);
-        return <RowCard key={lesson.id} icon="📅" iconTone="violet" title={lessonTitle(lesson)} subtitle={`${student?.name || 'Ученик не найден'} · ${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={lesson.status} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />;
-      }) : <Card><p className="subtitle">Ближайших уроков пока нет.</p></Card>}
-      <Section title="История занятий" />
-      {history.length ? history.map((lesson) => {
-        const student = getStudent(data, lesson.studentId);
-        return <RowCard key={lesson.id} icon={iconByStatus(lesson.status)} iconTone={toneByStatus(lesson.status)} title={lessonTitle(lesson)} subtitle={`${student?.name || 'Ученик не найден'} · ${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={lesson.status} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />;
-      }) : <Card><p className="subtitle">История занятий пока пуста.</p></Card>}
+        return (
+          <RowCard
+            key={lesson.id}
+            icon={ACTIVE_LESSON_STATUSES.includes(lesson.status) ? '□' : iconByStatus(lesson.status)}
+            iconTone={toneByStatus(lesson.status)}
+            title={lessonTitle(lesson)}
+            subtitle={`${student?.name || 'Ученик не найден'} · ${lesson.topic || 'Тема не указана'} · ${formatMaterialCount(lesson.materials?.length || 0)}`}
+            badge={lesson.status}
+            badgeTone={toneByStatus(lesson.status)}
+            onClick={() => openLesson(lesson.id)}
+          />
+        );
+      }) : (
+        <EmptyState
+          title="Занятий не найдено"
+          text="Измените фильтр или создайте урок. Из карточки ученика форма откроется уже с выбранным учеником."
+          action="Создать урок"
+          onAction={() => openCreate()}
+        />
+      )}
     </>
   );
 }
 
-export function LessonDetail({ data, actions, lessonId, onBack }) {
+export function LessonDetail({ data, actions, lessonId, openMode, onBack }) {
   const lesson = getLesson(data, lessonId);
   const student = lesson ? getStudent(data, lesson.studentId) : null;
   const [mode, setMode] = useState('view');
@@ -226,6 +286,7 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
 
   const canSaveLesson = Boolean(form.studentId && form.date && form.time && form.topic.trim() && normalizeDurationMinutes(form.durationMinutes));
   const canTransferLesson = Boolean(form.studentId && form.date && form.time && normalizeDurationMinutes(form.durationMinutes));
+  const canCompleteByTime = isPastIso(lesson.startAt);
 
   if (mode === 'edit') {
     return (
@@ -259,7 +320,10 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
           </div>
           <Field label="Номера заданий ОГЭ на уроке" value={form.focusTaskNumbers} onChange={(focusTaskNumbers) => setForm({ ...form, focusTaskNumbers })} placeholder="6, 7" />
           <TextArea label="Комментарий по завершению" value={form.completionComment} onChange={(completionComment) => setForm({ ...form, completionComment })} placeholder="Что важно учесть при оценке освоения" />
-          <Button onClick={completeLesson} disabled={isSaving}>{isSaving ? 'Завершаем…' : 'Завершить урок и запросить оценку освоения'}</Button>
+          {!canCompleteByTime ? (
+            <div className="inline-note warning">Урок ещё в будущем. Завершение станет доступно после начала занятия или после переноса времени.</div>
+          ) : null}
+          <Button onClick={completeLesson} disabled={isSaving || !canCompleteByTime}>{isSaving ? 'Завершаем…' : 'Завершить урок и запросить оценку освоения'}</Button>
         </Card>
       </>
     );
@@ -303,16 +367,34 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
       </Card>
       <Section title="Материалы к уроку" />
       <Card><MaterialList items={lesson.materials || []} /></Card>
+      {lesson.status === LESSON_STATUS.COMPLETED ? <Card className="card-green-soft"><strong>Урок проведён</strong><p className="subtitle">Он остаётся в истории и больше не выглядит как ближайшее занятие.</p></Card> : null}
+      {lesson.status === LESSON_STATUS.CANCELED ? <Card className="card-red-soft"><strong>Урок отменён</strong><p className="subtitle">Отменённое занятие нельзя завершить. При необходимости создайте новый урок.</p></Card> : null}
 
       {error && mode === 'view' ? <div className="inline-error">{error}</div> : null}
       {isEditable ? (
         <>
           <Section title="Действия" />
+          {!canCompleteByTime ? <div className="inline-note warning">Будущий урок нельзя отметить проведённым без изменения времени. Перенесите урок или дождитесь начала занятия.</div> : null}
           <div className="btn-grid-2">
             <Button variant="soft" onClick={() => setMode('edit')} disabled={isSaving}>Редактировать</Button>
             <Button variant="soft" onClick={() => setMode('transfer')} disabled={isSaving}>Перенести</Button>
-            <Button onClick={() => setMode('complete')} disabled={isSaving}>Проведён</Button>
+            <Button onClick={() => setMode('complete')} disabled={isSaving || !canCompleteByTime}>Проведён</Button>
             <Button variant="danger" onClick={cancelLesson} disabled={isSaving}>Отменить</Button>
+          </div>
+          <div className="btn-row" style={{ marginTop: 10 }}>
+            <Button variant="soft" onClick={() => setMode('edit')} disabled={isSaving}>Добавить материалы</Button>
+            <Button
+              variant="soft"
+              onClick={() => openMode?.('create-homework', TEACHER_ROUTE.HOMEWORK, {
+                studentId: lesson.studentId,
+                lessonId: lesson.id,
+                taskNumbers: lesson.focusTaskNumbers || [],
+                title: lesson.topic ? `По уроку: ${lesson.topic}` : '',
+              })}
+              disabled={isSaving}
+            >
+              Выдать ДЗ по уроку
+            </Button>
           </div>
         </>
       ) : null}
@@ -320,8 +402,18 @@ export function LessonDetail({ data, actions, lessonId, onBack }) {
   );
 }
 
-export function CreateLesson({ data, actions, onBack }) {
-  const [form, setForm] = useState({ studentId: '', date: '', time: '', durationMinutes: '60', timezone: appTimezone(), topic: '', focusTaskNumbers: '', note: '', materials: [] });
+export function CreateLesson({ data, actions, context = {}, onBack }) {
+  const [form, setForm] = useState({
+    studentId: context.studentId || '',
+    date: context.date || '',
+    time: context.time || '',
+    durationMinutes: String(context.durationMinutes || '60'),
+    timezone: context.timezone || appTimezone(),
+    topic: context.title || context.topic || '',
+    focusTaskNumbers: stringifyTaskNumbers(context.taskNumbers || context.focusTaskNumbers),
+    note: context.note || '',
+    materials: context.materials || [],
+  });
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -363,6 +455,7 @@ export function CreateLesson({ data, actions, onBack }) {
       <Header title="Создать урок" subtitle="Планирование занятия, темы и материалов к уроку" onBack={onBack} />
       <Card className="form-stack">
         {error ? <div className="inline-error">{error}</div> : null}
+        {context.studentId ? <div className="inline-note success">Ученик выбран из карточки: {getStudent(data, context.studentId)?.name || 'ученик'}.</div> : null}
         <SelectField label="Ученик" value={form.studentId} onChange={(studentId) => setForm({ ...form, studentId })} options={[{ value: '', label: 'Выберите ученика' }, ...data.students.map((s) => ({ value: s.id, label: s.name }))]} />
         <Field label="Дата" type="date" value={form.date} onChange={(date) => setForm({ ...form, date })} />
         <Field label="Время" type="time" value={form.time} onChange={(time) => setForm({ ...form, time })} />
@@ -377,3 +470,5 @@ export function CreateLesson({ data, actions, onBack }) {
     </>
   );
 }
+
+export const LessonsList = ScheduleScreen;
