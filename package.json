@@ -5,6 +5,7 @@
   "scripts": {
     "backend:generate": "pnpm --dir oge-tutor-backend run prisma:generate",
     "backend:build": "pnpm --dir oge-tutor-backend run build",
+    "backend:demo-seed": "pnpm --dir oge-tutor-backend run demo:seed",
     "backend:lint": "pnpm --dir oge-tutor-backend run lint",
     "backend:test": "pnpm --dir oge-tutor-backend test",
     "backend:test:e2e": "pnpm --dir oge-tutor-backend run test:e2e",
