@@ -23,6 +23,7 @@ Services:
 - `frontend`: serves the Vite static build through nginx.
 
 Uploads are stored in the `oge_tutor_uploads` Docker volume.
+Back up both PostgreSQL and uploads before upgrades; see [Backups and Restore Checks](backups.md).
 
 ## Production Migrations
 
@@ -74,6 +75,10 @@ GET /health/ready
 ```
 
 `/health/ready` checks database connectivity.
+
+## Authentication Rate Limits
+
+Login, password reset, and access-token endpoints return HTTP `429` after repeated requests. Limits apply per IP and per normalized email or token. The built-in limiter stores counters in the backend process, which is appropriate for this single-instance Compose deployment. A multi-replica deployment needs shared rate-limit storage and trusted reverse-proxy IP configuration.
 
 ## VPS Deployment
 

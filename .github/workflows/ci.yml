@@ -53,6 +53,9 @@ jobs:
       - name: Test backend
         run: pnpm --dir oge-tutor-backend test
 
+      - name: Check backup scripts
+        run: bash -n scripts/backup.sh scripts/verify-backup.sh
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

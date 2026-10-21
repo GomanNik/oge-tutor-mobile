@@ -79,6 +79,7 @@ Seed is not run in CI.
 Jobs:
 
 - `backend`: install, Prisma generate, build, lint, tests.
+- `backend` also checks backup script syntax; run the full restore check against Docker as described in [backups.md](backups.md).
 - `frontend`: install, build, lint, typecheck, tests.
 - `prisma-db-check`: clean PostgreSQL service, migration deploy, migration status.
 - `e2e`: clean PostgreSQL service, migration deploy, AppModule HTTP e2e tests.
