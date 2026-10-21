@@ -389,4 +389,24 @@ describeIfDb('AppModule e2e production flows', () => {
       .expect(201)
       .expect(({ body }) => expect(body).toEqual({ ok: true }));
   });
+
+  it('rate limits login, password reset and token verification by target', async () => {
+    const login = () => request(server)
+      .post('/auth/login')
+      .send({ email: 'limited-e2e@mail.ru', password: 'wrongpass' });
+    for (let attempt = 0; attempt < 8; attempt += 1) await login().expect(401);
+    await login().expect(429).expect(({ body }) => expect(body.code).toBe('rate_limited'));
+
+    const reset = () => request(server)
+      .post('/auth/password-reset')
+      .send({ email: 'limited-reset-e2e@mail.ru' });
+    for (let attempt = 0; attempt < 3; attempt += 1) await reset().expect(201);
+    await reset().expect(429);
+
+    const verify = () => request(server)
+      .post('/auth/access-token/verify')
+      .send({ token: 'limited-invalid-token' });
+    for (let attempt = 0; attempt < 10; attempt += 1) await verify().expect(422);
+    await verify().expect(429);
+  });
 });
