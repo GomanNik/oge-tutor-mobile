@@ -13,6 +13,9 @@ import { CreateLesson, LessonDetail } from '../src/teacher/TeacherLessons.jsx';
 import { MaterialsList } from '../src/teacher/TeacherMaterials.jsx';
 import { StudentCard } from '../src/teacher/TeacherStudents.jsx';
 import { StudentProgress } from '../src/student/StudentProgress.jsx';
+import StudentHome from '../src/student/StudentHome.jsx';
+import { StudentLessonDetail, StudentLessons } from '../src/student/StudentLessons.jsx';
+import { selectTeacherOverview } from '../src/domain/productSelectors.js';
 
 function isoOffset(days, hour = 10) {
   const date = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -103,6 +106,32 @@ afterEach(() => {
 });
 
 describe('redesigned teacher product flows', () => {
+  it('does not present an unfinished past lesson as upcoming', () => {
+    const oldLesson = { ...baseData().lessons[0], startAt: isoOffset(-1), endAt: isoOffset(-1, 11) };
+    const futureLesson = baseData().lessons[0];
+
+    expect(selectTeacherOverview(baseData({ lessons: [oldLesson] })).nearestLesson).toBeNull();
+
+    render(React.createElement(StudentHome, {
+      student: baseStudent(), lessons: [oldLesson], homeworks: [], onNavigate: vi.fn(), openWeakTask: vi.fn(),
+    }));
+    expect(screen.getByText('Пока нет запланированных уроков')).toBeTruthy();
+    expect(screen.queryByText('planned')).toBeNull();
+    cleanup();
+
+    render(React.createElement(StudentLessons, {
+      lessons: [oldLesson, { ...futureLesson, id: 'l-2', topic: 'Будущий урок' }], openLesson: vi.fn(),
+    }));
+    expect(screen.getByText('Прошедшие без отметки')).toBeTruthy();
+    expect(screen.getByText('Не отмечен')).toBeTruthy();
+    expect(screen.getByText('Запланирован')).toBeTruthy();
+    expect(screen.getByText('Будущий урок · 1 материал')).toBeTruthy();
+    cleanup();
+
+    render(React.createElement(StudentLessonDetail, { lesson: oldLesson, onBack: vi.fn() }));
+    expect(screen.getByText('Не отмечен')).toBeTruthy();
+  });
+
   it('answers what the teacher should do today on the dashboard', () => {
     const today = new Date();
     today.setHours(18, 0, 0, 0);

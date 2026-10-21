@@ -6,6 +6,7 @@ import React from 'react';
 import { LESSON_STATUS, statusLabel } from '../api/contracts.js';
 import { Badge, Card, EmptyState, Header, MaterialList, RowCard, Section, toneByStatus } from '../shared/ui.jsx';
 import { ACTIVE_LESSON_STATUSES } from '../shared/constants.js';
+import { isUpcomingLesson } from '../domain/productSelectors.js';
 import { formatDateLabel, formatTimeLabel } from '../shared/dateTime.js';
 import { formatMaterialCount } from '../shared/formatters.js';
 
@@ -14,19 +15,24 @@ function lessonTitle(lesson) {
 }
 
 export function StudentLessons({ lessons, openLesson }) {
-  const planned = lessons.filter((lesson) => ACTIVE_LESSON_STATUSES.includes(lesson.status));
+  const planned = lessons.filter((lesson) => isUpcomingLesson(lesson));
+  const pending = lessons.filter((lesson) => ACTIVE_LESSON_STATUSES.includes(lesson.status) && !isUpcomingLesson(lesson));
   const history = lessons.filter((lesson) => !ACTIVE_LESSON_STATUSES.includes(lesson.status));
   return (
     <>
       <Header title="Уроки" subtitle="Дата, время, тема и материалы занятия" />
       <Section title="Ближайшие уроки" />
       {planned.map((lesson) => (
-        <RowCard key={lesson.id} icon="□" iconTone="violet" title={lessonTitle(lesson)} subtitle={`${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={lesson.status} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />
+        <RowCard key={lesson.id} icon="□" iconTone="violet" title={lessonTitle(lesson)} subtitle={`${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={statusLabel(lesson.status)} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />
       ))}
       {!planned.length ? <EmptyState title="Ближайших уроков нет" text="Когда преподаватель запланирует занятие, оно появится в этом списке." /> : null}
+      {pending.length ? <Section title="Прошедшие без отметки" /> : null}
+      {pending.map((lesson) => (
+        <RowCard key={lesson.id} icon="!" iconTone="amber" title={lessonTitle(lesson)} subtitle={`${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge="Не отмечен" badgeTone="amber" onClick={() => openLesson(lesson.id)} />
+      ))}
       <Section title="История занятий" />
       {history.map((lesson) => (
-        <RowCard key={lesson.id} icon={lesson.status === LESSON_STATUS.CANCELED ? '×' : '✓'} iconTone={toneByStatus(lesson.status)} title={lessonTitle(lesson)} subtitle={`${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={lesson.status} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />
+        <RowCard key={lesson.id} icon={lesson.status === LESSON_STATUS.CANCELED ? '×' : '✓'} iconTone={toneByStatus(lesson.status)} title={lessonTitle(lesson)} subtitle={`${lesson.topic} · ${formatMaterialCount(lesson.materials?.length || 0)}`} badge={statusLabel(lesson.status)} badgeTone={toneByStatus(lesson.status)} onClick={() => openLesson(lesson.id)} />
       ))}
       {!history.length ? <EmptyState title="История занятий пуста" text="Проведённые и отменённые уроки появятся здесь." /> : null}
     </>
@@ -37,7 +43,7 @@ export function StudentLessonDetail({ lesson, onBack }) {
   if (!lesson) return <Card><strong>Урок не найден.</strong><p className="subtitle">Возможно, запись уже изменилась.</p></Card>;
   return (
     <>
-      <Header title="Карточка урока" subtitle={lesson.topic} onBack={onBack} right={<Badge tone={toneByStatus(lesson.status)}>{statusLabel(lesson.status)}</Badge>} />
+      <Header title="Карточка урока" subtitle={lesson.topic} onBack={onBack} right={<Badge tone={toneByStatus(lesson.status)}>{ACTIVE_LESSON_STATUSES.includes(lesson.status) && !isUpcomingLesson(lesson) ? 'Не отмечен' : statusLabel(lesson.status)}</Badge>} />
       <Card className="form-stack">
         <div className="lesson-time-card">
           <div>

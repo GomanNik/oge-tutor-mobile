@@ -61,6 +61,12 @@ export function sortByStartAt(items = []) {
   return [...items].sort((a, b) => asTime(a.startAt) - asTime(b.startAt));
 }
 
+export function isUpcomingLesson(lesson, now = new Date()) {
+  if (!ACTIVE_LESSONS.has(lesson.status)) return false;
+  const end = asTime(lesson.endAt) || asTime(lesson.startAt);
+  return end >= now.getTime();
+}
+
 export function sortByCreatedAtDesc(items = []) {
   return [...items].sort((a, b) => asTime(b.createdAt || b.updatedAt) - asTime(a.createdAt || a.updatedAt));
 }
@@ -72,7 +78,7 @@ export function getStudentById(data, studentId) {
 export function selectTeacherOverview(data, now = new Date()) {
   const activeLessons = sortByStartAt((data.lessons || []).filter((lesson) => ACTIVE_LESSONS.has(lesson.status)));
   const todayLessons = activeLessons.filter((lesson) => isSameDayIso(lesson.startAt, now));
-  const upcomingLessons = activeLessons.filter((lesson) => asTime(lesson.startAt) >= startOfDay(now).getTime());
+  const upcomingLessons = activeLessons.filter((lesson) => isUpcomingLesson(lesson, now));
   const nearestLesson = upcomingLessons[0] || null;
   const toReview = (data.homeworks || []).filter((item) => item.status === HOMEWORK_STATUS.SUBMITTED);
   const overdue = (data.homeworks || []).filter((item) => item.status === HOMEWORK_STATUS.OVERDUE);

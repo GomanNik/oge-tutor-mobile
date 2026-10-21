@@ -6,7 +6,8 @@ import React from 'react';
 import { STUDENT_ROUTE } from '../api/contracts.js';
 import { TASKS } from '../domain/tasks/index.js';
 import { getStudentProgressView } from '../domain/progress/index.js';
-import { HOMEWORK_STATUS, LESSON_STATUS } from '../api/contracts.js';
+import { HOMEWORK_STATUS, statusLabel } from '../api/contracts.js';
+import { isSameDayIso, isUpcomingLesson } from '../domain/productSelectors.js';
 import { Avatar, Badge, Card, toneByStatus } from '../shared/ui.jsx';
 import { formatDateLabel, formatTimeLabel } from '../shared/dateTime.js';
 
@@ -14,8 +15,8 @@ function getFirstName(name) {
   return String(name || '').trim().split(' ')[0] || 'ученик';
 }
 
-function getNearestLesson(lessons) {
-  return lessons.find((lesson) => [LESSON_STATUS.PLANNED, LESSON_STATUS.RESCHEDULED].includes(lesson.status)) || null;
+function getTodayLesson(lessons) {
+  return lessons.find((lesson) => isUpcomingLesson(lesson) && isSameDayIso(lesson.startAt)) || null;
 }
 
 function getPriorityHomework(homeworks) {
@@ -126,7 +127,7 @@ function PreparationCard({ progress, weakTasks, homeworks, openProgress, openWea
 }
 
 export default function StudentHome({ student, lessons, homeworks, onNavigate, openWeakTask }) {
-  const nearestLesson = getNearestLesson(lessons);
+  const nearestLesson = getTodayLesson(lessons);
   const activeHomework = getPriorityHomework(homeworks);
   const progress = getStudentProgressView(student);
   const weakTasks = progress.weak.slice(0, 3).map(getTask).filter(Boolean);
@@ -153,7 +154,7 @@ export default function StudentHome({ student, lessons, homeworks, onNavigate, o
             title="Урок"
             value={nearestLesson ? formatTimeLabel(nearestLesson.startAt) : '—'}
             subtitle={nearestLesson ? nearestLesson.topic : 'Пока нет запланированных уроков'}
-            badge={nearestLesson?.status}
+            badge={nearestLesson ? statusLabel(nearestLesson.status) : null}
             badgeTone={toneByStatus(nearestLesson?.status)}
             onClick={() => onNavigate(STUDENT_ROUTE.LESSONS)}
           />
