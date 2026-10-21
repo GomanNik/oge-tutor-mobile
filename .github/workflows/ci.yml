@@ -223,4 +223,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit workspace dependencies
-        run: pnpm audit --audit-level moderate
+        run: pnpm run audit

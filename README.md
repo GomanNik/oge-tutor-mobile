@@ -1,0 +1,28 @@
+# OGE Tutor
+
+Tutor and student application with a React frontend, NestJS API, PostgreSQL, and Prisma.
+
+## Local quality check
+
+Use Node.js 22 and pnpm 9.15.9. From the repository root in PowerShell:
+
+```powershell
+pnpm install --frozen-lockfile
+$env:VITE_API_BASE_URL = 'http://localhost:3000'
+pnpm run quality
+```
+
+The API URL is embedded in a production frontend build. Set it to the actual API address when building for deployment. Mock mode is rejected by production builds.
+
+## Run locally
+
+For a frontend-only demo:
+
+```powershell
+$env:VITE_USE_MOCK = 'true'
+pnpm --dir oge-tutor-app run dev
+```
+
+For the full stack, copy `.env.example` to `.env` and run `docker compose up -d --build`. The full stack requires a running Docker engine and serves the frontend on `http://localhost:8080`.
+
+See [frontend setup](oge-tutor-app/README.md), [backend setup](oge-tutor-backend/README.md), [environment variables](docs/env.md), and [deployment](docs/deployment.md).

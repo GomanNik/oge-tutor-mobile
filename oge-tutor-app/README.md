@@ -56,6 +56,8 @@ pnpm run typecheck
 pnpm test
 ```
 
+Set `VITE_API_BASE_URL` to a valid API URL before `pnpm run build` (for example, `$env:VITE_API_BASE_URL = 'http://localhost:3000'` in PowerShell).
+
 `pnpm run lint` runs real ESLint and repository architecture checks. `pnpm test` runs Vitest domain/API contract tests and smoke tests.
 
 ## Backend-ready architecture work

@@ -16,24 +16,24 @@ Production-oriented backend for the current OGE Tutor frontend. The frontend con
 
 ## Quick start
 
+From the repository root:
+
 ```powershell
-cd "C:\Users\Goman Nikita\Downloads\oge-tutor-app-v2\oge-tutor-backend"
-pnpm install
-Copy-Item .env.example .env
-
-docker compose down -v
-docker compose up -d
-
-pnpm run prisma:generate
-pnpm exec prisma migrate dev --name init
-pnpm run prisma:seed
-pnpm run dev
+pnpm install --frozen-lockfile
+if (-not (Test-Path oge-tutor-backend/.env)) { Copy-Item oge-tutor-backend/.env.example oge-tutor-backend/.env }
+docker compose up -d postgres
+pnpm --dir oge-tutor-backend run prisma:generate
+pnpm --dir oge-tutor-backend exec prisma migrate deploy
+pnpm --dir oge-tutor-backend run dev
 ```
+
+Run `pnpm --dir oge-tutor-backend run prisma:seed` only for a disposable demo database; it replaces demo data.
 
 When working from the repository root, use the workspace install:
 
 ```powershell
 pnpm install --frozen-lockfile
+$env:VITE_API_BASE_URL = 'http://localhost:3000'
 pnpm run quality
 ```
 
