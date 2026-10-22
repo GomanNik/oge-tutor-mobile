@@ -1,32 +1,53 @@
-# Backups and Restore Checks
+# Database and Upload Backups
 
-`scripts/backup.sh` briefly stops the backend so the database and uploads cannot change between snapshots. It restarts the backend even if the backup fails. The script verifies both archives, writes SHA-256 checksums, and only then publishes the backup directory. Backups contain personal data; keep the directory private and never commit or serve it publicly.
+`scripts/backup.sh` backs up the bundled Compose PostgreSQL database and uploads volume as one snapshot. It briefly stops the backend, restarts it even after a failed snapshot, checks both archives, then restores the dump and uploads in an isolated container before marking the copy `VERIFIED`. A failed run is recorded and never silently replaces the latest successful record. The script refuses to back up a bundled database when the backend points to an external database.
 
-## Local Windows Check
+Backups contain personal data. Keep them private, encrypted when copied offsite, and outside any public web root. A backup on the same VPS does not protect against host loss.
 
-Run from the repository root in Git Bash while the Compose stack is healthy:
+## Local Check
+
+Run in Git Bash from the repository root with the Compose stack healthy. Use an external directory for durable copies; the default `backups/` is ignored by Git and deployment sync.
 
 ```bash
 COMPOSE_PROJECT_NAME=oge-tutor-app-v2 BACKUP_DIR="$PWD/backups" bash scripts/backup.sh
+BACKUP_DIR="$PWD/backups" bash scripts/check-backups.sh
+```
 
+Expect a short API interruption. `backup.sh` verifies the restore automatically. To repeat it for a specific snapshot:
+
+```bash
 bash scripts/verify-backup.sh "$PWD/backups/BACKUP_DIRECTORY"
 ```
 
-Replace `BACKUP_DIRECTORY` with the directory printed by the backup command. Expect a short API interruption while the backend is stopped. The verification script checks the SHA-256 hashes, reads the uploads archive, and restores the database into a disposable PostgreSQL container with no network access or published port. It never restores into the running application database.
+`verify-backup.sh` never writes to the running database. It validates SHA-256 checksums, restores the dump into a disposable PostgreSQL container without networking, extracts the uploads archive, checks for application tables, and destroys the container.
 
-## Daily VPS Backup
+## Daily VPS Timer
 
-The deployment checkout lives in `/opt/oge-tutor`. Create the backup directory and install a daily cron entry for the deployment user:
+The project must be checked out on a Linux systemd host, with Docker Compose available to the deployment user. Preview the units first:
 
 ```bash
-install -m 700 -d /opt/oge-tutor/backups
-crontab -e
+sudo bash scripts/install-backup-timer.sh --project /opt/oge-tutor --backup-dir /var/lib/oge-tutor/backups --user deploy --dry-run
 ```
 
-```cron
-0 2 * * * cd /opt/oge-tutor && BACKUP_DIR=/opt/oge-tutor/backups bash scripts/backup.sh >> /opt/oge-tutor/backups/backup.log 2>&1
+After confirming paths, user, disk space, and Docker access, install and activate the daily 02:00 UTC timer:
+
+```bash
+sudo bash scripts/install-backup-timer.sh --project /opt/oge-tutor --backup-dir /var/lib/oge-tutor/backups --user deploy --enable
+systemctl list-timers --all oge-tutor-backup.timer
 ```
 
-After the first scheduled run, inspect `backup.log` and run `bash scripts/verify-backup.sh /opt/oge-tutor/backups/BACKUP_DIRECTORY`. Repeat the restore check regularly, especially after changing PostgreSQL versions or the schema. Copy backups to a separate encrypted location; a copy on the same VPS does not protect against host loss. Monitor free space and apply a retention policy appropriate for the deployment. Do not delete the only verified backup.
+Replace `deploy` with the actual deployment user. `--calendar` changes the schedule; `--keep` changes the number of verified copies retained (default 14). The timer is persistent, so a missed run starts when the host returns. Failed or damaged snapshots are preserved for diagnosis and never count toward retention. The install script does not activate anything unless `--enable` is passed.
 
-For a real recovery, stop writes, preserve the failed database and uploads, and restore into a new environment first. Pointing `pg_restore` at the live database is deliberately not automated by these scripts.
+After the first run, verify health and inspect the journal:
+
+```bash
+sudo systemctl start oge-tutor-backup.service
+BACKUP_DIR=/var/lib/oge-tutor/backups bash scripts/check-backups.sh
+sudo journalctl -u oge-tutor-backup.service -n 100 --no-pager
+```
+
+Run `check-backups.sh` from monitoring at least daily. It fails if the latest run failed, the latest verified copy is older than 26 hours, or its checksums no longer match. Adjust `BACKUP_MAX_AGE_SECONDS` if the schedule changes. Alert on a nonzero exit, a failed systemd unit, and low free space.
+
+The default retention keeps 14 verified copies and 90 days of run records. Failed snapshots are intentionally not deleted automatically; monitor disk usage and investigate them before removal. Copy verified backups to a separate encrypted location with independent retention and periodically test a restore from that offsite copy.
+
+For real recovery, stop writes, preserve the failed database and uploads, and restore into a new environment first. These scripts deliberately do not restore into the live database.
