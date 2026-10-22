@@ -25,10 +25,18 @@ export class TeacherService {
     const teacherId = this.assertTeacher(user);
     const name = cleanText(patch.name);
     if (!name) throw validationError('Имя не может быть пустым.', { name: 'required' });
-    return this.prisma.teacherProfile.update({
-      where: { id: teacherId },
-      data: { name, avatar: cleanText(patch.avatar), bg: cleanText(patch.bg) },
-      include: { user: true },
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.teacherProfile.update({
+        where: { id: teacherId },
+        data: { name, avatar: cleanText(patch.avatar), bg: cleanText(patch.bg) },
+        include: { user: true },
+      });
+      const mapping = await tx.legacyWorkspaceMapping.findUnique({ where: { teacherProfileId: teacherId } });
+      if (mapping) await tx.workspaceMembership.updateMany({
+        where: { workspaceId: mapping.workspaceId, userId: updated.userId },
+        data: { displayNameOverride: name, revision: { increment: 1 } },
+      });
+      return updated;
     });
   }
 

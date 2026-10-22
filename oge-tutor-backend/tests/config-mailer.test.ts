@@ -39,6 +39,7 @@ describe('environment validation', () => {
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/app',
       JWT_SECRET: 'safe-production-secret',
+      WORKSPACE_INVITE_KEY: 'a-long-independent-invitation-key-for-tests',
       PUBLIC_BACKEND_URL: 'https://api.example.com',
       APP_FRONTEND_URL: 'https://app.example.com',
       MAILER_PROVIDER: 'smtp',

@@ -12,6 +12,35 @@ enum Role {
   student
 }
 
+enum WorkspaceRole {
+  admin
+  teacher
+  student
+}
+
+enum WorkspaceStatus {
+  active
+  archived
+}
+
+enum MembershipStatus {
+  active
+  suspended
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum DeliveryStatus {
+  queued
+  sent
+  failed
+}
+
 enum AccessTokenType {
   invite
   password_reset
@@ -106,7 +135,9 @@ model User {
   id             String          @id @default(cuid())
   email          String          @unique
   passwordHash   String
-  role           Role
+  role           Role?
+  displayName    String
+  revision       Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   teacherProfile TeacherProfile?
@@ -115,6 +146,11 @@ model User {
   accessTokens   AccessToken[]
   sessions       AuthSession[]
   sessionVersion Int             @default(0)
+  memberships    WorkspaceMembership[]
+  sentInvitations WorkspaceInvitation[] @relation("InvitationSender")
+  auditEvents    WorkspaceAuditEvent[] @relation("AuditActor")
+  roleGrants     WorkspaceRoleGrant[] @relation("RoleGranter")
+  roleRevocations WorkspaceRoleGrant[] @relation("RoleRevoker")
 
   @@index([role])
 }
@@ -163,6 +199,144 @@ model TeacherProfile {
   homeworks Homework[]
   topics    MaterialTopic[]
   notices   Notification[]
+  legacyWorkspace LegacyWorkspaceMapping?
+}
+
+model Workspace {
+  id          String          @id @default(cuid())
+  name        String
+  slug        String          @unique
+  timezone    String          @default("UTC")
+  status      WorkspaceStatus @default(active)
+  revision    Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  memberships WorkspaceMembership[]
+  invitations WorkspaceInvitation[]
+  auditEvents WorkspaceAuditEvent[]
+  legacyMapping LegacyWorkspaceMapping?
+}
+
+model WorkspaceMembership {
+  id                  String           @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  userId              String
+  user                User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  status              MembershipStatus @default(active)
+  displayNameOverride String?
+  revision            Int              @default(0)
+  joinedAt            DateTime         @default(now())
+  suspendedAt         DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  roles               WorkspaceRoleGrant[]
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId, status, id])
+  @@index([workspaceId, createdAt, id])
+  @@index([userId, status])
+}
+
+model WorkspaceRoleGrant {
+  id           String              @id @default(cuid())
+  membershipId String
+  membership   WorkspaceMembership @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  role         WorkspaceRole
+  grantedAt    DateTime            @default(now())
+  grantedById  String?
+  grantedBy    User?               @relation("RoleGranter", fields: [grantedById], references: [id], onDelete: Restrict)
+  revokedAt    DateTime?
+  revokedById  String?
+  revokedBy    User?               @relation("RoleRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@unique([membershipId, role])
+}
+
+model WorkspaceInvitation {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  email          String
+  tokenHash      String           @unique
+  status         InvitationStatus @default(pending)
+  deliveryStatus DeliveryStatus   @default(queued)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  inviterUserId  String
+  inviter       User             @relation("InvitationSender", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  revision       Int              @default(0)
+  createdAt      DateTime         @default(now())
+  roles          WorkspaceInvitationRole[]
+  emails         WorkspaceEmailOutbox[]
+
+  @@index([workspaceId, email, status])
+  @@index([workspaceId, createdAt, id])
+}
+
+model WorkspaceInvitationRole {
+  invitationId String
+  invitation   WorkspaceInvitation @relation(fields: [invitationId], references: [id], onDelete: Restrict)
+  role         WorkspaceRole
+
+  @@id([invitationId, role])
+}
+
+model WorkspaceEmailOutbox {
+  id             String             @id @default(cuid())
+  invitationId   String
+  invitation     WorkspaceInvitation @relation(fields: [invitationId], references: [id], onDelete: Restrict)
+  revision       Int
+  encryptedLink  String?
+  attempts       Int                @default(0)
+  nextAttemptAt  DateTime           @default(now())
+  leaseUntil     DateTime?
+  sentAt         DateTime?
+  canceledAt     DateTime?
+  lastErrorCode  String?
+  createdAt      DateTime           @default(now())
+
+  @@index([sentAt, canceledAt, nextAttemptAt])
+}
+
+model WorkspaceAuditEvent {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  actorUserId String?
+  actor       User?     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  actorKind   String    @default("user")
+  targetType  String
+  targetId    String
+  action      String
+  changes     Json      @default("{}")
+  reason      String?
+  requestId   String
+  occurredAt  DateTime  @default(now())
+
+  @@index([workspaceId, occurredAt, id])
+}
+
+model LegacyWorkspaceMapping {
+  teacherProfileId String         @id
+  teacherProfile   TeacherProfile @relation(fields: [teacherProfileId], references: [id], onDelete: Restrict)
+  workspaceId      String         @unique
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(cuid())
+  actorUserId String
+  route       String
+  key         String
+  bodyHash    String
+  response    Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([actorUserId, route, key])
+  @@index([expiresAt])
 }
 
 model StudentProfile {

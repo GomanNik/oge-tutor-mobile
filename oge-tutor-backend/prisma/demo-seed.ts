@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { ensureLegacyStudent, ensureLegacyTeacher } from '../src/workspace/legacy';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -142,8 +143,8 @@ async function upsertTeacher(tx: any) {
   const passwordHash = await bcrypt.hash(TEACHER_PASSWORD, 12);
   const user = await tx.user.upsert({
     where: { email: TEACHER_EMAIL },
-    update: { passwordHash, role: ROLE.TEACHER },
-    create: { email: TEACHER_EMAIL, passwordHash, role: ROLE.TEACHER },
+    update: { passwordHash, role: ROLE.TEACHER, displayName: 'Анна Демидова' },
+    create: { email: TEACHER_EMAIL, passwordHash, role: ROLE.TEACHER, displayName: 'Анна Демидова' },
   });
 
   const teacher = await tx.teacherProfile.upsert({
@@ -179,8 +180,8 @@ async function upsertStudent(tx: any, teacherId: string, input: {
   const passwordHash = await bcrypt.hash(input.access === ACCESS.ACTIVE ? ACTIVE_STUDENT_PASSWORD : 'InvitePending123', 12);
   const user = await tx.user.upsert({
     where: { email: input.email },
-    update: { passwordHash, role: ROLE.STUDENT },
-    create: { email: input.email, passwordHash, role: ROLE.STUDENT },
+    update: { passwordHash, role: ROLE.STUDENT, displayName: input.name },
+    create: { email: input.email, passwordHash, role: ROLE.STUDENT, displayName: input.name },
   });
 
   const student = await tx.studentProfile.upsert({
@@ -371,6 +372,7 @@ async function seedDemoData() {
 
   return prisma.$transaction(async (tx) => {
     const { user: teacherUser, teacher } = await upsertTeacher(tx);
+    await ensureLegacyTeacher(tx, teacher.id);
     await tx.user.update({ where: { id: teacherUser.id }, data: { passwordHash: teacherPasswordHash } });
 
     const ivan = await upsertStudent(tx, teacher.id, {
@@ -403,6 +405,9 @@ async function seedDemoData() {
       bg: 'amber',
       access: ACCESS.INVITE_SENT,
     });
+    await ensureLegacyStudent(tx, ivan.student.id);
+    await ensureLegacyStudent(tx, maria.student.id);
+    await ensureLegacyStudent(tx, artem.student.id);
 
     await tx.accessToken.upsert({
       where: { tokenHash: tokenHash(INVITE_TOKEN) },

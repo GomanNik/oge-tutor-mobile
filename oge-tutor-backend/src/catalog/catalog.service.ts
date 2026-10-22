@@ -199,6 +199,7 @@ export class CatalogService {
   async initialForUser(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id }, include: { teacherProfile: true, studentProfile: true } });
     if (!user) throw notFound('Пользователь не найден.');
+    if (!user.role) throw forbidden();
     return this.initial({ id, email: user.email, role: user.role, teacherId: user.teacherProfile?.id || user.studentProfile?.teacherId, studentId: user.studentProfile?.id });
   }
 

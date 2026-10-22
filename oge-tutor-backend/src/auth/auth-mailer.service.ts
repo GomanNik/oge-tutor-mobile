@@ -96,7 +96,7 @@ export class AuthMailerService {
       if (isProduction(this.config)) {
         throw serviceUnavailable('Отправка писем не настроена.', { mailer: 'not_configured' });
       }
-      this.logger.debug(`Dev mailer prepared ${params.type} link for ${params.email}.`);
+      this.logger.debug(`Dev mailer prepared ${params.type} link.`);
       return { status: 'dev_preview', provider: 'noop' };
     }
 
@@ -114,6 +114,24 @@ export class AuthMailerService {
       html: message.html,
     });
 
+    return { status: 'sent', provider: 'smtp' };
+  }
+
+  async sendWorkspaceInvitation(params: { email: string; workspaceName: string; link: string; expiresAt: Date }): Promise<AccessTokenMailResult> {
+    const provider = this.provider();
+    if (provider !== 'smtp') {
+      if (isProduction(this.config)) throw serviceUnavailable('Отправка писем не настроена.', { mailer: 'not_configured' });
+      this.logger.debug('Dev mailer prepared a workspace invitation.');
+      return { status: 'dev_preview', provider: 'noop' };
+    }
+    const from = this.config.get<string>('SMTP_FROM');
+    if (!from) throw serviceUnavailable('Отправка писем не настроена.', { mailer: 'missing_from' });
+    const title = `Приглашение в ${params.workspaceName}`;
+    const text = `${title}\n\nОткройте ссылку: ${params.link}\nСсылка действует до ${params.expiresAt.toISOString()}.`;
+    await this.smtpTransport().sendMail({
+      from, to: params.email, subject: title, text,
+      html: `<p>${escapeHtml(title)}</p><p><a href="${escapeHtml(params.link)}">Принять приглашение</a></p><p>Ссылка действует до ${escapeHtml(params.expiresAt.toISOString())}.</p>`,
+    });
     return { status: 'sent', provider: 'smtp' };
   }
 }

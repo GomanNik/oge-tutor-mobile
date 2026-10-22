@@ -85,6 +85,10 @@ export function validateEnv(env: RawEnv) {
   const smtpFrom = optionalText(env, 'SMTP_FROM');
   const smtpPort = numberWithDefault(env, 'SMTP_PORT', 587, 1, 65535);
   const smtpSecure = optionalText(env, 'SMTP_SECURE') === 'true';
+  const workspaceInviteKey = optionalText(env, 'WORKSPACE_INVITE_KEY');
+  if (production && (!workspaceInviteKey || workspaceInviteKey.length < 32)) {
+    throw new Error('WORKSPACE_INVITE_KEY must be at least 32 characters in production.');
+  }
 
   if (production && mailerProvider !== 'smtp') {
     throw new Error('MAILER_PROVIDER=smtp is required in production.');
@@ -118,5 +122,6 @@ export function validateEnv(env: RawEnv) {
     SMTP_PASS: smtpPass,
     SMTP_FROM: smtpFrom,
     SMTP_SECURE: smtpSecure,
+    WORKSPACE_INVITE_KEY: workspaceInviteKey,
   };
 }

@@ -16,6 +16,11 @@ import { LessonsService } from '../src/lessons/lessons.service';
 import { MaterialsService } from '../src/materials/materials.service';
 import { StudentsService } from '../src/students/students.service';
 
+vi.mock('../src/workspace/legacy', () => ({
+  ensureLegacyStudent: vi.fn(async () => undefined),
+  syncLegacyStudentAccess: vi.fn(async () => undefined),
+}));
+
 function config(values: Record<string, string | undefined> = {}) {
   return { get: (key: string) => values[key] } as any;
 }
@@ -83,6 +88,17 @@ class MemoryPrisma {
     create: vi.fn(async ({ data }) => {
       this.sessions.push(data);
       return data;
+    }),
+  };
+
+  legacyWorkspaceMapping = {
+    findUnique: vi.fn(async () => ({ workspaceId: 'legacy-test', workspace: { status: 'active' } })),
+  };
+
+  workspaceMembership = {
+    findUnique: vi.fn(async ({ where }) => {
+      const user = this.users.find((item) => item.id === where.workspaceId_userId.userId);
+      return user ? { status: 'active', roles: [{ role: user.role, revokedAt: null }] } : null;
     }),
   };
 

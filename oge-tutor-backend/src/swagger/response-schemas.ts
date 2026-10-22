@@ -1,5 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
+import { DeliveryStatus, InvitationStatus, MembershipStatus, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -113,3 +114,36 @@ for (const name of [...Object.values(collectionSchemas), 'ProgressHistory']) {
   responseSchemas[`${name}Page`] = pageSchema(ref(name));
   responseSchemas[`${name}Detail`] = detailSchema(ref(name));
 }
+
+const strictObject = (properties: Record<string, Schema>, required = Object.keys(properties)): SchemaObject => ({
+  ...object(properties, required), additionalProperties: false,
+});
+const v2Role = enumeration(WorkspaceRole);
+const v2Roles = array(v2Role);
+const v2PageInfo = strictObject({ nextCursor: { ...string, nullable: true }, hasMore: boolean });
+const v2Page = (item: Schema) => strictObject({ items: array(item), pageInfo: v2PageInfo });
+const v2Mutation = (item: Schema) => strictObject({ item, changed: array(string), requestId: string });
+
+Object.assign(responseSchemas, {
+  V2Session: strictObject({ token: string, userId: string, expiresAt: date }),
+  V2User: strictObject({ id: string, email: { ...string, format: 'email' }, displayName: string, revision: integer }),
+  V2Context: strictObject({ workspaceId: string, name: string, status: enumeration(WorkspaceStatus), legacyRole: { type: 'string', enum: ['teacher', 'student'], nullable: true }, roles: v2Roles }),
+  V2Member: strictObject({ id: string, userId: string, email: { ...string, format: 'email' }, displayName: string, roles: v2Roles, status: enumeration(MembershipStatus), revision: integer }),
+  V2Invitation: strictObject({ id: string, email: { ...string, format: 'email' }, roles: v2Roles, expiresAt: date, status: enumeration(InvitationStatus), deliveryStatus: enumeration(DeliveryStatus), revision: integer }),
+  V2Workspace: strictObject({ id: string, name: string, timezone: string, status: enumeration(WorkspaceStatus), revision: integer }),
+  V2AuditChanges: strictObject({
+    role: v2Role, roles: v2Roles, status: enumeration(MembershipStatus), displayNameOverride: { ...string, nullable: true },
+  }, []),
+  V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
+  V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
+  V2UserDetail: detailSchema(ref('V2User')),
+  V2UserMutation: v2Mutation(ref('V2User')),
+  V2ContextsPage: v2Page(ref('V2Context')),
+  V2WorkspaceDetail: detailSchema(ref('V2Workspace')),
+  V2MemberPage: v2Page(ref('V2Member')),
+  V2MemberDetail: detailSchema(ref('V2Member')),
+  V2MemberMutation: v2Mutation(ref('V2Member')),
+  V2InvitationPage: v2Page(ref('V2Invitation')),
+  V2InvitationMutation: v2Mutation(ref('V2Invitation')),
+  V2AuditPage: v2Page(ref('V2AuditEvent')),
+});

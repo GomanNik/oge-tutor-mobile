@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import { ensureLegacyStudent, ensureLegacyTeacher } from '../src/workspace/legacy';
 
 const prisma = new PrismaClient();
 
@@ -15,11 +16,20 @@ async function main() {
   await prisma.materialAttachment.deleteMany();
   await prisma.materialTopic.deleteMany();
   await prisma.fileResource.deleteMany();
+  await prisma.workspaceEmailOutbox.deleteMany();
+  await prisma.workspaceInvitationRole.deleteMany();
+  await prisma.workspaceInvitation.deleteMany();
+  await prisma.workspaceAuditEvent.deleteMany();
+  await prisma.workspaceRoleGrant.deleteMany();
+  await prisma.workspaceMembership.deleteMany();
+  await prisma.legacyWorkspaceMapping.deleteMany();
+  await prisma.workspace.deleteMany();
+  await prisma.idempotencyRecord.deleteMany();
   await prisma.studentProfile.deleteMany();
   await prisma.teacherProfile.deleteMany();
   await prisma.user.deleteMany();
 
-  const teacherUser = await prisma.user.create({ data: { email: 'teacher@mail.ru', passwordHash, role: 'teacher' } });
+  const teacherUser = await prisma.user.create({ data: { email: 'teacher@mail.ru', passwordHash, role: 'teacher', displayName: 'Анна Сергеева' } });
   const teacher = await prisma.teacherProfile.create({
     data: {
       userId: teacherUser.id,
@@ -33,8 +43,9 @@ async function main() {
       },
     },
   });
+  await ensureLegacyTeacher(prisma, teacher.id);
 
-  const ivanUser = await prisma.user.create({ data: { email: 'ivan@mail.ru', passwordHash, role: 'student' } });
+  const ivanUser = await prisma.user.create({ data: { email: 'ivan@mail.ru', passwordHash, role: 'student', displayName: 'Иван Петров' } });
   const ivan = await prisma.studentProfile.create({
     data: {
       userId: ivanUser.id,
@@ -48,9 +59,10 @@ async function main() {
       settings: { lessonReminders: true, homeworkDeadlines: true },
     },
   });
+  await ensureLegacyStudent(prisma, ivan.id);
 
-  const mariaUser = await prisma.user.create({ data: { email: 'maria@mail.ru', passwordHash, role: 'student' } });
-  await prisma.studentProfile.create({
+  const mariaUser = await prisma.user.create({ data: { email: 'maria@mail.ru', passwordHash, role: 'student', displayName: 'Мария Соколова' } });
+  const maria = await prisma.studentProfile.create({
     data: {
       userId: mariaUser.id,
       teacherId: teacher.id,
@@ -63,6 +75,7 @@ async function main() {
       settings: { lessonReminders: true, homeworkDeadlines: true },
     },
   });
+  await ensureLegacyStudent(prisma, maria.id);
 
   const task6 = await prisma.studentTaskProgress.create({
     data: {

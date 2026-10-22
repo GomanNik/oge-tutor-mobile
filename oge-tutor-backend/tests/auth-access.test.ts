@@ -6,6 +6,11 @@ import { getJwtSecret } from '../src/auth/auth-config';
 import { ACCESS_STATUS, ACCESS_TOKEN_TYPE, ROLE, STUDENT_ACCESS_ACTION } from '../src/common/contracts';
 import { StudentsService } from '../src/students/students.service';
 
+vi.mock('../src/workspace/legacy', () => ({
+  ensureLegacyStudent: vi.fn(async () => undefined),
+  syncLegacyStudentAccess: vi.fn(async () => undefined),
+}));
+
 function config(values: Record<string, string | undefined> = {}) {
   return { get: (key: string) => values[key] } as any;
 }
@@ -182,6 +187,7 @@ describe('invite and reset tokens', () => {
 
   it('stores teacher note on create and update, but blocks student editing that note', async () => {
     let createdProfile: any;
+    const updateProfile = vi.fn(async ({ data }) => ({ id: 's-new', teacherId: 't-1', userId: 'u-new', ...data }));
     const tx = {
       user: {
         create: vi.fn(async ({ data }) => ({ id: 'u-new', ...data })),
@@ -191,14 +197,16 @@ describe('invite and reset tokens', () => {
           createdProfile = data;
           return { id: 's-new', ...data };
         }),
+        update: updateProfile,
       },
+      legacyWorkspaceMapping: { findUnique: vi.fn(async () => null) },
     };
     const prisma = {
       user: { findUnique: vi.fn(async () => null) },
       studentProfile: {
         findFirst: vi.fn(async () => ({ id: 's-new', userId: 'u-new', teacherId: 't-1', user: { passwordHash: 'hash' } })),
         findUnique: vi.fn(async () => ({ id: 's-new', userId: 'u-new', teacherId: 't-1', user: { passwordHash: 'hash' } })),
-        update: vi.fn(async ({ data }) => ({ id: 's-new', ...data })),
+        update: updateProfile,
       },
       $transaction: vi.fn(async (callback) => callback(tx)),
     };
