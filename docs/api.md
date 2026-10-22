@@ -1,8 +1,16 @@
 # HTTP API
 
-This page describes the **currently implemented API**. The proposed multi-subject/group-learning API v2 is documented separately in [platform/api-target.md](platform/api-target.md); those routes are not yet implemented.
+This page describes the **currently implemented API**. Workspace identity and administration are implemented under `/api/v2`; subjects, courses and groups in [platform/api-target.md](platform/api-target.md) remain future design.
 
-The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. All paths below are relative to the API origin; there is no `/api` prefix on application routes. Protected calls use `Authorization: Bearer <JWT>`; only health, login, password-reset, and access-token verification/completion are public. Rate limits apply to the public authentication routes.
+The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. The legacy routes below have no `/api` prefix; new workspace routes use `/api/v2`. Protected calls use `Authorization: Bearer <JWT>`; health, login, password-reset, access-token verification/completion and v2 invitation acceptance for a new account are public. Rate limits apply to public authentication routes.
+
+## Workspace API v2 (Block 1)
+
+`POST /api/v2/auth/login` returns `{session,user,contexts}` without a cabinet snapshot. `POST /api/v2/auth/logout` revokes the current session and returns 204. `GET/PATCH /api/v2/me` and `GET /api/v2/me/workspaces` manage the account and available contexts. A context reports `legacyRole` only when that account has a matching accessible v1 profile in the historical workspace.
+
+`GET /api/v2/workspaces/:workspaceId` reads the selected active workspace. Its `members`, `invitations` and `audit-events` routes provide scoped cursor pages; only an active workspace administrator can use the management routes. `POST /api/v2/invitations/accept-new` creates an account from a valid email invitation, while `accept-existing` adds a matching logged-in account. There is no public workspace creation or self-registration. See [the block 1 contract and operations](platform/block-1-operations.md) and the exact DTOs/errors in Swagger.
+
+Every workspace request requires `X-Active-Role`; the server rechecks membership and grant on each request. State transitions require `If-Match` revision (428 missing, 412 stale), while new invitations and grants require `Idempotency-Key`. Mutations return `{item,changed,requestId}`, not a full cabinet. A new `student`/`teacher` role does not create legacy educational records; courses and groups are not yet implemented.
 
 ## Response Contract
 

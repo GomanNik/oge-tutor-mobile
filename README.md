@@ -27,6 +27,6 @@ For the full stack, copy `.env.example` to `.env` and run `docker compose up -d 
 
 See [frontend setup](oge-tutor-app/README.md), [backend setup](oge-tutor-backend/README.md), [current HTTP API](docs/api.md), [environment variables](docs/env.md), and [deployment](docs/deployment.md).
 
-The [multi-subject and group-learning platform design](docs/platform/README.md) describes the proposed product, architecture, permissions, workflows, API v2, and migration plan. It is a target design, not functionality already available in this build.
+The [multi-subject and group-learning platform design](docs/platform/README.md) describes the roadmap. Block 1 adds workspace identity, invitations, admin membership management and audit under `/api/v2`; subjects, courses and group lessons remain future blocks. See the [block 1 runbook](docs/platform/block-1-operations.md) for bootstrap, SMTP preview and migration checks.
 
 Before changing a running stack, create and verify a [database and uploads backup](docs/backups.md).
