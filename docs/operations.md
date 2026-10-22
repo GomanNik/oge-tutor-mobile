@@ -1,6 +1,6 @@
 # Operations Runbook
 
-This runbook assumes the VPS deployment uses the root `docker-compose.yml`.
+This runbook assumes a VPS deployment using the root `docker-compose.yml`. As of 2026-10-22 there is no VPS for this project, so the deployment and timer steps below are preparation, not evidence of an active service. The proposed multi-subject platform has its own [target architecture and rollout plan](platform/README.md); this runbook describes the current stack only.
 
 ## Manual Deploy
 
@@ -106,74 +106,12 @@ docker compose exec backend pnpm --dir /app/oge-tutor-backend exec prisma migrat
 
 Do not run `prisma migrate dev` against production.
 
-## PostgreSQL Backup
+## Database and Upload Backups
 
-Create a backup directory outside the repository:
+Use the [verified database-and-uploads backup procedure](backups.md). It snapshots both components together, checks hashes, and tests an isolated restore. A database-only dump or an uploads-only archive is not a complete recovery point. Keep an encrypted off-server copy and alert on stale/failed backups. The systemd timer must be installed and enabled **on the actual VPS**; merely merging its script does not schedule backups.
 
-```bash
-mkdir -p "$HOME/oge-tutor-backups"
-```
-
-Dump the database:
-
-```bash
-cd "$DEPLOY_PATH"
-docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-oge_tutor}" > "$HOME/oge-tutor-backups/oge_tutor_$(date +%Y%m%d_%H%M%S).sql"
-```
-
-For MVP, take at least a daily database backup and copy it to encrypted off-server storage.
-
-## PostgreSQL Restore
-
-Stop write traffic first, then restore into the intended database:
-
-```bash
-cd "$DEPLOY_PATH"
-docker compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-oge_tutor}" < "$HOME/oge-tutor-backups/<backup-file>.sql"
-```
-
-Validate:
-
-```bash
-docker compose run --rm migrate
-curl --fail "$PUBLIC_BACKEND_URL/health/ready"
-```
-
-## Uploads Backup
-
-Archive the uploads volume:
-
-```bash
-cd "$DEPLOY_PATH"
-docker run --rm -v "$(basename "$DEPLOY_PATH")_oge_tutor_uploads:/data:ro" -v "$HOME/oge-tutor-backups:/backup" alpine sh -c 'tar czf /backup/uploads_$(date +%Y%m%d_%H%M%S).tgz -C /data .'
-```
-
-If the Compose project name is customized, replace the volume name accordingly. Never commit upload archives to git.
-
-## Uploads Restore
-
-```bash
-cd "$DEPLOY_PATH"
-docker compose stop backend
-docker run --rm -v "$(basename "$DEPLOY_PATH")_oge_tutor_uploads:/data" -v "$HOME/oge-tutor-backups:/backup" alpine sh -c 'rm -rf /data/* && tar xzf /backup/<uploads-backup>.tgz -C /data'
-docker compose up -d backend
-```
+Never restore directly over the only live copy. Preserve the failing environment, restore into a new isolated environment first, validate data and file links, plan write downtime and only then perform a controlled cutover. The repository scripts deliberately do not overwrite the live database or volume. A production restore needs a separate reviewed runbook for the exact deployment and backup location.
 
 ## Rollback
 
-If the server keeps a Git checkout:
-
-```bash
-cd "$DEPLOY_PATH"
-git checkout <previous-good-commit>
-docker compose up -d --build
-curl --fail "$PUBLIC_BACKEND_URL/health/ready"
-```
-
-If deployment uses rsync release copies, restore the previous release directory and rerun:
-
-```bash
-docker compose up -d --build
-```
-
-Before rolling back code across database migrations, check whether the migration is backward-compatible. Restore a database backup if the previous code cannot read the current schema.
+Identify the exact previously healthy release and check whether its schema is compatible with the **current** database before changing containers. The manual deploy uses rsync rather than guaranteeing a Git checkout on the VPS; keep an immutable copy of the previous release. If new writes have used a newer schema, reverting only code can corrupt or hide data. Prefer a forward fix where possible; restoring a snapshot loses later writes unless they are reconciled. See [the platform migration plan](platform/migration-and-acceptance.md) for the future multi-subject rollout rules.

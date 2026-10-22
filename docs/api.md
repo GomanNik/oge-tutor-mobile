@@ -1,5 +1,7 @@
 # HTTP API
 
+This page describes the **currently implemented API**. The proposed multi-subject/group-learning API v2 is documented separately in [platform/api-target.md](platform/api-target.md); those routes are not yet implemented.
+
 The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. All paths below are relative to the API origin; there is no `/api` prefix on application routes. Protected calls use `Authorization: Bearer <JWT>`; only health, login, password-reset, and access-token verification/completion are public. Rate limits apply to the public authentication routes.
 
 ## Response Contract

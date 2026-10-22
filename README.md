@@ -25,6 +25,8 @@ pnpm --dir oge-tutor-app run dev
 
 For the full stack, copy `.env.example` to `.env` and run `docker compose up -d --build`. The full stack requires a running Docker engine and serves the frontend on `http://localhost:8080`.
 
-See [frontend setup](oge-tutor-app/README.md), [backend setup](oge-tutor-backend/README.md), [HTTP API](docs/api.md), [environment variables](docs/env.md), and [deployment](docs/deployment.md).
+See [frontend setup](oge-tutor-app/README.md), [backend setup](oge-tutor-backend/README.md), [current HTTP API](docs/api.md), [environment variables](docs/env.md), and [deployment](docs/deployment.md).
+
+The [multi-subject and group-learning platform design](docs/platform/README.md) describes the proposed product, architecture, permissions, workflows, API v2, and migration plan. It is a target design, not functionality already available in this build.
 
 Before changing a running stack, create and verify a [database and uploads backup](docs/backups.md).
