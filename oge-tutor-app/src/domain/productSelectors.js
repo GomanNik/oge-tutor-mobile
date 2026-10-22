@@ -109,13 +109,15 @@ function notice(id, type, title, message, extra = {}) {
     lessonId: extra.lessonId || '',
     homeworkId: extra.homeworkId || '',
     taskNumber: extra.taskNumber ?? null,
+    topicId: extra.topicId || '',
+    persisted: Boolean(extra.persisted),
     actionLabel: extra.actionLabel || 'Открыть',
   };
 }
 
-export function deriveTeacherNotifications(data, now = new Date()) {
+export function deriveTeacherNotifications(data, now = new Date(), { includeResolved = false } = {}) {
   const backend = (data.notifications || [])
-    .filter((item) => item.status !== NOTIFICATION_STATUS.RESOLVED)
+    .filter((item) => includeResolved || item.status !== NOTIFICATION_STATUS.RESOLVED)
     .map((item) => {
       const student = getStudentById(data, item.studentId);
       return notice(
@@ -123,9 +125,11 @@ export function deriveTeacherNotifications(data, now = new Date()) {
         item.type,
         item.title || 'Уведомление',
         student ? `${student.name} · ${item.message || ''}` : item.message,
-        { ...item, tone: 'amber', actionLabel: item.type === NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED ? 'Оценить' : 'Открыть' },
+        { ...item, persisted: true, tone: 'amber', actionLabel: item.type === NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED ? 'Оценить' : 'Открыть' },
       );
     });
+
+  if (data.pagination?.notifications) return sortByCreatedAtDesc(backend);
 
   const submitted = (data.homeworks || [])
     .filter((hw) => hw.status === HOMEWORK_STATUS.SUBMITTED)
@@ -179,10 +183,13 @@ export function deriveTeacherNotifications(data, now = new Date()) {
   return sortByCreatedAtDesc([...backend, ...submitted, ...overdue, ...upcoming, ...access]);
 }
 
-export function deriveStudentNotifications({ student, lessons = [], homeworks = [], materials = [], notifications = [] }, now = new Date()) {
+export function deriveStudentNotifications({ student, lessons = [], homeworks = [], materials = [], notifications = [], pagination }, now = new Date(), { includeResolved = false } = {}) {
   const incoming = (notifications || [])
-    .filter((item) => item.status !== NOTIFICATION_STATUS.RESOLVED)
-    .map((item) => notice(item.id, item.type, item.title, item.message, { ...item, tone: 'amber' }));
+    .filter((item) => (!item.studentId || item.studentId === student?.id) && item.type !== NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED)
+    .filter((item) => includeResolved || item.status !== NOTIFICATION_STATUS.RESOLVED)
+    .map((item) => notice(item.id, item.type, item.title, item.message, { ...item, persisted: true, tone: 'amber' }));
+
+  if (pagination?.notifications) return sortByCreatedAtDesc(incoming);
 
   const assigned = homeworks
     .filter((hw) => hw.status === HOMEWORK_STATUS.ASSIGNED || hw.status === HOMEWORK_STATUS.NEEDS_REVISION || hw.status === HOMEWORK_STATUS.OVERDUE)

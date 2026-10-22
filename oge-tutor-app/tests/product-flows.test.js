@@ -196,6 +196,23 @@ describe('redesigned teacher product flows', () => {
     expect(screen.getByText(/Будущий урок нельзя отметить проведённым/)).toBeTruthy();
   });
 
+  it('loads paginated progress history from the student card', async () => {
+    const progressHistory = vi.fn(async () => ({
+      items: [{ id: 'history-1', taskNumber: 6, coverageStatus: 'assessment_needed', masteryLevel: null, source: 'lesson_completed', createdAt: new Date().toISOString(), comment: 'После урока' }],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    }));
+    render(React.createElement(StudentCard, {
+      data: baseData(), actions: { progressHistory }, studentId: 's-1',
+      openMode: vi.fn(), openHomework: vi.fn(), openLesson: vi.fn(), onBack: vi.fn(),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'История' }));
+    expect(await screen.findByText(/Задание 6:/)).toBeTruthy();
+    expect(progressHistory).toHaveBeenCalledWith('s-1', expect.objectContaining({ page: 1, pageSize: 25 }));
+  });
+
   it('shows material detail actions and usage without exposing technical URLs as row text', () => {
     render(React.createElement(MaterialsList, {
       data: baseData(),

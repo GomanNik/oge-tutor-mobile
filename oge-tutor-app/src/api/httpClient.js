@@ -4,7 +4,7 @@
  */
 import { ApiError } from './apiError.js';
 import { API_TOKEN_KEY, getStoredApiToken } from './authToken.js';
-import { mapApiErrorPayload, mapBackendResultDto, mapFileResourceDto } from './dto.js';
+import { mapApiErrorPayload, mapBackendResultDto, mapFileResourceDto, mapPageDto, mapProgressHistoryEventDto, RESOURCE_MAPPERS } from './dto.js';
 
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
@@ -182,8 +182,36 @@ export function createHttpBackend(baseUrl) {
     return request(`/homeworks/${homeworkId}/submissions`, { method: 'POST', body: form });
   }
 
+  function queryString(filters = {}) {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    return params.size ? `?${params}` : '';
+  }
+
+  function resourceMapper(resource) {
+    if (!Object.hasOwn(RESOURCE_MAPPERS, resource)) throw new Error('Unknown resource');
+    return RESOURCE_MAPPERS[resource];
+  }
+
   return {
     bootstrap: () => request('/bootstrap'),
+    list: async (resource, filters = {}) => {
+      const mapper = resourceMapper(resource);
+      return mapPageDto(await request(`/${resource}${queryString({ page: 1, pageSize: 25, ...filters })}`), mapper);
+    },
+    detail: async (resource, id) => {
+      const mapper = resourceMapper(resource);
+      const result = await request(`/${resource}/${encodeURIComponent(id)}`);
+      return { ...result, item: mapper(result.item) };
+    },
+    progressHistory: async (studentId, filters = {}) => mapPageDto(
+      await request(`/students/${encodeURIComponent(studentId)}/progress/history${queryString({ page: 1, pageSize: 25, ...filters })}`),
+      mapProgressHistoryEventDto,
+    ),
+    updateNotification: (id, status) => request(`/notifications/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } }),
+    readAllNotifications: () => request('/notifications/read-all', { method: 'POST', body: {} }),
     login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
     logout: async () => {
       const result = await request('/auth/logout', { method: 'POST' });

@@ -12,6 +12,7 @@ import { formatDateLabel, formatTimeLabel } from '../shared/dateTime.js';
 import { formatMaterialCount } from '../shared/formatters.js';
 import { Avatar, Badge, Button, Card, EmptyState, Field, Header, RowCard, Section, SelectField, TextArea, cx, iconByStatus, solidBg, toneByStatus } from '../shared/ui.jsx';
 import { StudentProgressTab } from './student-progress/StudentProgressTab.jsx';
+import { PaginatedProgressHistory } from './student-progress/PaginatedProgressHistory.jsx';
 
 const getStudent = selectStudent;
 
@@ -377,7 +378,9 @@ export function StudentCard({ data, actions, studentId, openMode, openHomework, 
 
       {tab === STUDENT_CARD_TAB.HISTORY ? (
         <>
-          <Section title="История изменений" />
+          <Section title="Изменения прогресса" />
+          <PaginatedProgressHistory student={student} actions={actions} />
+          <Section title="Последние события" />
           {history.length ? history.map((item) => (
             <RowCard key={item.id} icon="•" iconTone={item.tone} title={item.title} subtitle={item.subtitle} />
           )) : <EmptyState title="История пока пуста" text="Здесь появятся проведённые уроки, отправки ДЗ, проверки и изменения прогресса." />}

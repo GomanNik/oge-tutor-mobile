@@ -64,7 +64,7 @@ export function StudentProgressTab({ student, data, actions }) {
       </Card>
 
       <Section title="Карточка задания" />
-      <StudentTaskProgressDrawer student={student} progress={selectedProgress} onSave={saveTaskProgress} isSaving={isSaving} />
+      <StudentTaskProgressDrawer student={student} progress={selectedProgress} actions={actions} onSave={saveTaskProgress} isSaving={isSaving} />
 
       <WeakTasksPanel tasks={weakTasks} homeworks={homeworks} materials={data.materials} onOpenTask={setSelectedTaskNumber} />
     </>
