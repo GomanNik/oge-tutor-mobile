@@ -1,91 +1,24 @@
-import { IsArray, IsISO8601, IsOptional, IsString } from 'class-validator';
+import { PartialType } from '@nestjs/swagger';
+import { AttachmentDto } from '../common/attachment.dto';
+import { LESSON_SOURCE, LESSON_STATUS } from '../common/contracts';
+import { DateField, EnumField, NestedArrayField, RequiredText, TaskNumbersField, TextField } from '../common/dto-fields';
 
 export class CreateLessonDto {
-  @IsString()
-  studentId!: string;
-
-  @IsString()
-  topic!: string;
-
-  @IsArray()
-  @IsOptional()
-  focusTaskNumbers?: number[];
-
-  @IsISO8601()
-  startAt!: string;
-
-  @IsISO8601()
-  endAt!: string;
-
-  @IsString()
-  @IsOptional()
-  timezone?: string;
-
-  @IsString()
-  @IsOptional()
-  source?: string;
-
-  @IsString()
-  @IsOptional()
-  note?: string;
-
-  @IsArray()
-  @IsOptional()
-  materials?: unknown[];
+  @RequiredText() studentId!: string;
+  @RequiredText() topic!: string;
+  @TaskNumbersField() focusTaskNumbers?: number[];
+  @DateField(true) startAt!: string;
+  @DateField(true) endAt!: string;
+  @TextField() timezone?: string;
+  @EnumField(LESSON_SOURCE) source?: string;
+  @TextField() note?: string;
+  @NestedArrayField(AttachmentDto) materials?: AttachmentDto[];
 }
-
-export class UpdateLessonDto {
-  @IsString()
-  @IsOptional()
-  studentId?: string;
-
-  @IsString()
-  @IsOptional()
-  topic?: string;
-
-  @IsArray()
-  @IsOptional()
-  focusTaskNumbers?: number[];
-
-  @IsISO8601()
-  @IsOptional()
-  startAt?: string;
-
-  @IsISO8601()
-  @IsOptional()
-  endAt?: string;
-
-  @IsString()
-  @IsOptional()
-  timezone?: string;
-
-  @IsString()
-  @IsOptional()
-  status?: string;
-
-  @IsString()
-  @IsOptional()
-  source?: string;
-
-  @IsString()
-  @IsOptional()
-  note?: string;
-
-  @IsArray()
-  @IsOptional()
-  materials?: unknown[];
+export class UpdateLessonDto extends PartialType(CreateLessonDto, { skipNullProperties: false }) {
+  @EnumField(LESSON_STATUS) status?: string;
 }
-
 export class CompleteLessonDto {
-  @IsArray()
-  @IsOptional()
-  focusTaskNumbers?: number[];
-
-  @IsString()
-  @IsOptional()
-  completionComment?: string;
-
-  @IsString()
-  @IsOptional()
-  comment?: string;
+  @TaskNumbersField() focusTaskNumbers?: number[];
+  @TextField() completionComment?: string;
+  @TextField(false, { description: 'Alias for completionComment.' }) comment?: string;
 }

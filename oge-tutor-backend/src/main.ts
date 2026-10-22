@@ -4,14 +4,15 @@
  */
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import { AppModule } from './app.module';
 import { HttpErrorFilter } from './common/http-error.filter';
+import { createValidationPipe } from './common/validation-pipe';
+import { createApiDocument } from './swagger/api-document';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { cors: false });
@@ -43,20 +44,10 @@ async function bootstrap(): Promise<void> {
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    transform: true,
-    forbidUnknownValues: false,
-  }));
+  app.useGlobalPipes(createValidationPipe());
   app.useGlobalFilters(new HttpErrorFilter());
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('OGE Tutor Backend API')
-    .setDescription('Backend contract for the OGE Tutor frontend')
-    .setVersion('0.1.0')
-    .addBearerAuth()
-    .build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  SwaggerModule.setup('api/docs', app, createApiDocument(app));
 
   const port = Number(config.get('PORT') || 3000);
   await app.listen(port);

@@ -1,7 +1,14 @@
-import { IsObject, IsOptional } from 'class-validator';
+import { BooleanField, NestedField } from './dto-fields';
 
+export class NotificationPreferencesDto {
+  @BooleanField() lessonReminders?: boolean;
+  @BooleanField() homeworkDeadlines?: boolean;
+  @BooleanField() homeworkReviewed?: boolean;
+  @BooleanField() newMaterials?: boolean;
+  @BooleanField() submittedSolutions?: boolean;
+  @BooleanField() overdueHomework?: boolean;
+  @BooleanField() studentAccessProblems?: boolean;
+}
 export class SettingsDto {
-  @IsObject()
-  @IsOptional()
-  settings?: Record<string, unknown>;
+  @NestedField(NotificationPreferencesDto) notifications?: NotificationPreferencesDto;
 }

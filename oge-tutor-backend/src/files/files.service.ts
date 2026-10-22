@@ -9,8 +9,8 @@ import { FILE_SCOPE, FileScope, MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../
 import { forbidden, notFound, validationError } from '../common/app-error';
 import { cleanText, requireText } from '../common/validation';
 import { buildFileDownloadUrl } from './file-url';
-
-const ALLOWED_MIME_PREFIXES = ['application/pdf', 'image/', 'text/plain', 'application/vnd.openxmlformats-officedocument', 'application/msword'];
+import { detectUploadType } from './file-content';
+import { uploadDirectory, uploadLimit } from './upload-config';
 
 type AttachmentLike = Record<string, any>;
 
@@ -25,37 +25,43 @@ export class FilesService {
     return FILE_SCOPE.PRIVATE_UPLOAD;
   }
 
-  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, meta: { title?: string; context?: string } = {}) {
+  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, meta: { title?: string; context?: string } = {}, db: Pick<PrismaService, 'fileResource'> = this.prisma) {
     if (!file) throw validationError('Выберите файл.', { file: 'required' });
-    const maxBytes = Number(this.config.get('MAX_UPLOAD_BYTES') || 15 * 1024 * 1024);
-    if (file.size > maxBytes) throw validationError('Файл слишком большой.', { file: 'too_large' });
-    if (file.mimetype && !ALLOWED_MIME_PREFIXES.some((prefix) => file.mimetype.startsWith(prefix))) {
-      throw validationError('Тип файла не поддерживается.', { file: 'unsupported_type' });
-    }
-
-    const uploadDir = this.config.get<string>('UPLOAD_DIR') || 'uploads';
-    const absoluteDir = path.resolve(process.cwd(), uploadDir);
-    fs.mkdirSync(absoluteDir, { recursive: true });
-    const safeExt = path.extname(file.originalname).replace(/[^.a-zA-Z0-9]/g, '') || '';
-    const storedName = `${randomUUID()}${safeExt}`;
-    const storagePath = path.join(absoluteDir, storedName);
-    fs.writeFileSync(storagePath, file.buffer);
-
-    const fileId = randomUUID();
-    const url = buildFileDownloadUrl(this.config, fileId);
-
-    return this.prisma.fileResource.create({
+    if (!file.path) throw validationError('Upload must be streamed to disk.', { file: 'invalid_upload' });
+    let storagePath: string | undefined;
+    try {
+      const { size } = await fs.promises.stat(file.path);
+      if (size > uploadLimit(this.config)) throw validationError('Файл слишком большой.', { file: 'too_large' });
+      if (!size) throw validationError('Файл пуст.', { file: 'empty' });
+      const detected = await detectUploadType(file.path, file.originalname);
+      const absoluteDir = uploadDirectory(this.config);
+      await fs.promises.mkdir(absoluteDir, { recursive: true });
+      storagePath = path.join(absoluteDir, `${randomUUID()}.${detected.ext}`);
+      await fs.promises.rename(file.path, storagePath);
+      const fileId = randomUUID();
+      const url = buildFileDownloadUrl(this.config, fileId);
+      return await db.fileResource.create({
       data: {
         id: fileId,
         ownerId: user.id,
         scope: this.uploadScope(user, meta.context),
         originalName: file.originalname,
-        mimeType: file.mimetype || 'application/octet-stream',
-        size: file.size,
+        mimeType: detected.mime,
+        size,
         url,
         storagePath,
       },
-    });
+      });
+    } catch (error) {
+      if (storagePath) await fs.promises.rm(storagePath, { force: true });
+      throw error;
+    } finally {
+      await fs.promises.rm(file.path, { force: true });
+    }
+  }
+
+  async removeStoredFile(storagePath: string) {
+    await fs.promises.rm(storagePath, { force: true });
   }
 
   async requireFile(id: string) {

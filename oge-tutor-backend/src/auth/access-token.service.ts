@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { revokeAllSessions } from './session-revocation';
 import { ConfigService } from '@nestjs/config';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -183,7 +184,7 @@ export class AccessTokenService {
 
       await tx.user.update({
         where: { id: record.userId },
-        data: { passwordHash: await bcrypt.hash(password, 12) },
+        data: { passwordHash: await bcrypt.hash(password, 12), ...revokeAllSessions() },
       });
 
       if (record.user.role === ROLE.STUDENT && record.user.studentProfile) {

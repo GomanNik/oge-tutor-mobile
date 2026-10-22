@@ -1,83 +1,28 @@
-import { IsEmail, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
-
-export class CreateStudentDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  name!: string;
-
-  @IsString()
-  @MinLength(6)
-  @IsOptional()
-  password?: string;
-
-  @IsString()
-  @IsOptional()
-  grade?: string;
-
-  @IsString()
-  @IsOptional()
-  goal?: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @IsString()
-  @IsOptional()
-  bg?: string;
-
-  @IsString()
-  @IsOptional()
-  note?: string;
-
-  @IsObject()
-  @IsOptional()
-  settings?: Record<string, unknown>;
-}
+import { STUDENT_ACCESS_ACTION } from '../common/contracts';
+import { EmailField, EnumField, NestedField, PasswordField, RequiredText, TextField } from '../common/dto-fields';
+import { SettingsDto } from '../common/settings.dto';
 
 export class UpdateStudentProfileDto {
-  @IsString()
-  name!: string;
-
-  @IsString()
-  @IsOptional()
-  grade?: string;
-
-  @IsString()
-  @IsOptional()
-  goal?: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @IsString()
-  @IsOptional()
-  bg?: string;
-
-  @IsString()
-  @IsOptional()
-  note?: string;
+  @RequiredText() name!: string;
+  @TextField() grade?: string;
+  @TextField() goal?: string;
+  @TextField() avatar?: string;
+  @TextField() bg?: string;
+  @TextField() note?: string;
 }
-
+export class CreateStudentDto extends UpdateStudentProfileDto {
+  @EmailField() email!: string;
+  @PasswordField(false) password?: string;
+  @NestedField(SettingsDto) settings?: SettingsDto;
+}
 export class UpdateStudentAccountDto {
-  @IsEmail()
-  email!: string;
+  @EmailField() email!: string;
 }
-
 export class ChangeStudentPasswordDto {
-  @IsString()
-  @IsOptional()
-  currentPassword?: string;
-
-  @IsString()
-  @MinLength(6)
-  newPassword!: string;
+  @TextField(false, { writeOnly: true }) currentPassword?: string;
+  @PasswordField() newPassword!: string;
 }
-
 export class UpdateAccessDto {
-  @IsString()
-  action!: string;
+  @EnumField(STUDENT_ACCESS_ACTION, true) action!: string;
 }
+export class UpdateStudentNotificationsDto extends SettingsDto {}

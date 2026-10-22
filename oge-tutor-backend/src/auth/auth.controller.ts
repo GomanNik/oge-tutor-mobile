@@ -3,7 +3,8 @@ import { SkipThrottle, Throttle, ThrottlerGuard, minutes } from '@nestjs/throttl
 import { Public } from './public.decorator';
 import { AuthService } from './auth.service';
 import { AccessTokenService } from './access-token.service';
-import { BootstrapService } from '../bootstrap/bootstrap.service';
+import { CatalogService } from '../catalog/catalog.service';
+import { CurrentUser, AuthUser } from '../common/current-user';
 import { AccessTokenCompleteDto, AccessTokenVerifyDto, LoginDto, PasswordResetDto } from './auth.dto';
 
 @Controller('auth')
@@ -12,7 +13,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly accessTokens: AccessTokenService,
-    private readonly bootstrap: BootstrapService,
+    private readonly catalog: CatalogService,
   ) {}
 
   @Public()
@@ -21,12 +22,13 @@ export class AuthController {
   async login(@Body() body: LoginDto) {
     const user = await this.auth.validateCredentials(body.email, body.password);
     const session = await this.auth.signSession(user);
-    return { session, data: await this.bootstrap.buildForUser(user.id) };
+    return { session, ...await this.catalog.initialForUser(user.id) };
   }
 
   @Post('logout')
   @SkipThrottle({ ip: true, target: true })
-  logout() {
+  async logout(@CurrentUser() user: AuthUser) {
+    await this.auth.revokeSession(user.id, user.sessionId);
     return { session: null };
   }
 

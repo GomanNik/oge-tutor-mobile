@@ -1,11 +1,6 @@
-import { IsOptional, IsString } from 'class-validator';
+import { TextField } from '../common/dto-fields';
 
 export class UploadFileMetaDto {
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsOptional()
-  context?: string;
+  @TextField() title?: string;
+  @TextField(false, { description: 'Upload context, including material-library, material-library-replace, homework-submission, and attachment contexts.' }) context?: string;
 }

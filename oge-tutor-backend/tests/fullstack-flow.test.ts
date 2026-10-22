@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { JwtService } from '@nestjs/jwt';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { AccessTokenService } from '../src/auth/access-token.service';
 import { AuthMailerService } from '../src/auth/auth-mailer.service';
@@ -19,12 +24,18 @@ function future(minutes: number) {
   return new Date(Date.now() + minutes * 60_000).toISOString();
 }
 
+const uploadDir = mkdtempSync(path.join(tmpdir(), 'oge-fullstack-'));
+afterAll(() => rmSync(uploadDir, { recursive: true, force: true }));
+
 function upload(name: string): Express.Multer.File {
+  const filePath = path.join(uploadDir, randomUUID());
+  const content = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF');
+  writeFileSync(filePath, content);
   return {
     originalname: name,
     mimetype: 'application/pdf',
-    size: 12,
-    buffer: Buffer.from('test file'),
+    size: content.length,
+    path: filePath,
   } as Express.Multer.File;
 }
 
@@ -33,6 +44,7 @@ class MemoryPrisma {
   teachers: any[] = [];
   students: any[] = [];
   accessTokens: any[] = [];
+  sessions: any[] = [];
   files: any[] = [];
   materialTopics: any[] = [];
   materialAttachments: any[] = [];
@@ -67,9 +79,16 @@ class MemoryPrisma {
     };
   }
 
+  authSession = {
+    create: vi.fn(async ({ data }) => {
+      this.sessions.push(data);
+      return data;
+    }),
+  };
+
   user = {
     create: vi.fn(async ({ data }) => {
-      const row = { id: this.next('u'), createdAt: new Date(), updatedAt: new Date(), ...data };
+      const row = { id: this.next('u'), sessionVersion: 0, createdAt: new Date(), updatedAt: new Date(), ...data };
       this.users.push(row);
       return row;
     }),
@@ -85,7 +104,10 @@ class MemoryPrisma {
     }),
     update: vi.fn(async ({ where, data }) => {
       const row = this.users.find((user) => user.id === where.id);
-      Object.assign(row, data, { updatedAt: new Date() });
+      const { sessionVersion, sessions, ...rest } = data;
+      if (sessionVersion?.increment) row.sessionVersion = (row.sessionVersion || 0) + sessionVersion.increment;
+      if (sessions) this.sessions.filter((session) => session.userId === row.id).forEach((session) => { session.revokedAt = new Date(); });
+      Object.assign(row, rest, { updatedAt: new Date() });
       return row;
     }),
   };
@@ -310,13 +332,14 @@ class MemoryPrisma {
     updateMany: vi.fn(async () => ({ count: 0 })),
   };
 
+  $queryRaw = vi.fn(async () => [{ id: 't-1' }]);
   $transaction = vi.fn(async (callback) => callback(this));
 }
 
 async function buildServices() {
   const prisma = new MemoryPrisma();
   const teacherPasswordHash = await bcrypt.hash('teacherpass', 4);
-  const teacherUser = { id: 'u-teacher', email: 'teacher@mail.ru', role: ROLE.TEACHER, passwordHash: teacherPasswordHash, createdAt: new Date(), updatedAt: new Date() };
+  const teacherUser = { id: 'u-teacher', email: 'teacher@mail.ru', role: ROLE.TEACHER, passwordHash: teacherPasswordHash, sessionVersion: 0, createdAt: new Date(), updatedAt: new Date() };
   prisma.users.push(teacherUser);
   prisma.teachers.push({ id: 't-1', userId: teacherUser.id, name: 'Teacher', avatar: '', bg: '', settings: {}, createdAt: new Date(), updatedAt: new Date() });
 
@@ -325,14 +348,14 @@ async function buildServices() {
     JWT_SECRET: 'test-secret',
     FRONTEND_ORIGIN: 'http://localhost:5173',
     PUBLIC_BACKEND_URL: 'http://localhost:3000',
-    UPLOAD_DIR: 'uploads/test-runtime',
+    UPLOAD_DIR: uploadDir,
   });
   const accessTokens = new AccessTokenService(prisma as any, cfg);
   const mailer = new AuthMailerService(cfg);
   const files = new FilesService(prisma as any, cfg);
   return {
     prisma,
-    auth: new AuthService(prisma as any, { sign: vi.fn(() => 'jwt-token') } as any, cfg, accessTokens, mailer),
+    auth: new AuthService(prisma as any, new JwtService(), cfg, accessTokens, mailer),
     bootstrap: new BootstrapService(prisma as any, cfg),
     students: new StudentsService(prisma as any, accessTokens, mailer),
     lessons: new LessonsService(prisma as any, files),
@@ -348,7 +371,7 @@ describe('service-level fullstack flow', () => {
     const app = await buildServices();
     const teacherLogin = await app.auth.validateCredentials('teacher@mail.ru', 'teacherpass');
     const teacherSession = await app.auth.signSession(teacherLogin);
-    expect(teacherSession).toMatchObject({ id: 't-1', role: ROLE.TEACHER, token: 'jwt-token' });
+    expect(teacherSession).toMatchObject({ id: 't-1', role: ROLE.TEACHER, token: expect.any(String) });
     await expect(app.bootstrap.buildForUser('u-teacher')).resolves.toMatchObject({ teacher: { id: 't-1' } });
 
     const teacher = { id: 'u-teacher', role: ROLE.TEACHER, teacherId: 't-1', email: 'teacher@mail.ru' };
@@ -377,6 +400,8 @@ describe('service-level fullstack flow', () => {
       focusTaskNumbers: [6],
       materials: [],
     });
+    // The service blocks future completion; advance the in-memory lesson to the time it was taught.
+    lesson.startAt = new Date(Date.now() - 60_000);
     await app.lessons.complete(teacher, lesson.id, { focusTaskNumbers: [6], completionComment: 'Done' });
 
     const homework = await app.homeworks.create(teacher, {

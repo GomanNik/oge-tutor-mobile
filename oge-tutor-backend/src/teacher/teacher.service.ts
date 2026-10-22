@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
+import { revokeAllSessions } from '../auth/session-revocation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
 import { ROLE } from '../common/contracts';
@@ -50,7 +51,7 @@ export class TeacherService {
     if (!currentOk) throw validationError('Текущий пароль указан неверно.', { currentPassword: 'invalid' });
     const newPassword = validatePassword(payload.newPassword || payload.password, 'newPassword');
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await this.prisma.user.update({ where: { id: teacher.userId }, data: { passwordHash } });
+    await this.prisma.user.update({ where: { id: teacher.userId }, data: { passwordHash, ...revokeAllSessions() } });
     return { ok: true };
   }
 
