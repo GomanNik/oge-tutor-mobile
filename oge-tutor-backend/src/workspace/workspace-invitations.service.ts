@@ -143,7 +143,7 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
       }
       throw error;
     }
-    if (applied.outboxId) await this.deliverOne(applied.outboxId);
+    if (applied.outboxId) await this.deliverOne(applied.outboxId, true);
     return applied.result;
   }
 
@@ -161,7 +161,7 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
       await tx.workspaceAuditEvent.create({ data: { workspaceId: ctx.workspaceId, actorUserId: ctx.userId, targetType: 'invitation', targetId: id, action: 'invitation.resent', changes: {}, requestId: ctx.requestId } });
       return { item: invitationDto(updated), changed: ['invitations'], requestId: ctx.requestId, outboxId: outbox.id };
     });
-    await this.deliverOne(result.outboxId);
+    await this.deliverOne(result.outboxId, true);
     return { item: result.item, changed: result.changed, requestId: result.requestId };
   }
 
@@ -237,10 +237,10 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async deliverOne(id: string) {
+  async deliverOne(id: string, immediate = false) {
     const now = new Date();
     const claimed = await this.prisma.workspaceEmailOutbox.updateMany({
-      where: { id, sentAt: null, canceledAt: null, nextAttemptAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
+      where: { id, sentAt: null, canceledAt: null, ...(!immediate ? { nextAttemptAt: { lte: now } } : {}), OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
       data: { leaseUntil: new Date(now.getTime() + 120000), attempts: { increment: 1 } },
     });
     if (claimed.count !== 1) return;
