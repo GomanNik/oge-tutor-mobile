@@ -3,24 +3,24 @@ import { CurrentUser, AuthUser } from '../common/current-user';
 import { Roles } from '../common/role.guard';
 import { ROLE } from '../common/contracts';
 import { TeacherService } from './teacher.service';
-import { BootstrapService } from '../bootstrap/bootstrap.service';
-import { ChangeTeacherPasswordDto, UpdateTeacherAccountDto, UpdateTeacherProfileDto } from './teacher.dto';
+import { CatalogService } from '../catalog/catalog.service';
+import { ChangeTeacherPasswordDto, UpdateTeacherAccountDto, UpdateTeacherNotificationsDto, UpdateTeacherProfileDto } from './teacher.dto';
 
 @Roles(ROLE.TEACHER)
 @Controller('teacher')
 export class TeacherController {
-  constructor(private readonly teacher: TeacherService, private readonly bootstrap: BootstrapService) {}
+  constructor(private readonly teacher: TeacherService, private readonly catalog: CatalogService) {}
 
   @Patch('profile')
   async updateProfile(@CurrentUser() user: AuthUser, @Body() body: UpdateTeacherProfileDto) {
     await this.teacher.updateProfile(user, body);
-    return { data: await this.bootstrap.buildForUser(user.id) };
+    return { changes: { teacher: await this.catalog.teacher(user) } };
   }
 
   @Patch('account')
   async updateAccount(@CurrentUser() user: AuthUser, @Body() body: UpdateTeacherAccountDto) {
     await this.teacher.updateAccount(user, body);
-    return { data: await this.bootstrap.buildForUser(user.id) };
+    return { changes: { teacher: await this.catalog.teacher(user) } };
   }
 
   @Post('security/password')
@@ -30,8 +30,8 @@ export class TeacherController {
   }
 
   @Patch('notifications')
-  async updateNotifications(@CurrentUser() user: AuthUser, @Body() body: any) {
+  async updateNotifications(@CurrentUser() user: AuthUser, @Body() body: UpdateTeacherNotificationsDto) {
     await this.teacher.updateNotifications(user, body);
-    return { data: await this.bootstrap.buildForUser(user.id) };
+    return { changes: { teacher: await this.catalog.teacher(user) } };
   }
 }

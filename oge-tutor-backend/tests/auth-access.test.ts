@@ -291,6 +291,7 @@ describe('access token consumption', () => {
 
     const passwordHash = tx.user.update.mock.calls[0][0].data.passwordHash;
     expect(passwordHash).not.toBe('newpass123');
+    expect(tx.user.update.mock.calls[0][0].data).toMatchObject({ sessionVersion: { increment: 1 }, sessions: { updateMany: { where: { revokedAt: null }, data: { revokedAt: expect.any(Date) } } } });
     await expect(bcrypt.compare('newpass123', passwordHash)).resolves.toBe(true);
     expect(tx.studentProfile.update).toHaveBeenCalledWith({ where: { id: 's-1' }, data: { access: ACCESS_STATUS.ACTIVE } });
   });
@@ -347,6 +348,7 @@ describe('access token consumption', () => {
     expect(JSON.stringify(verified)).not.toContain('raw-token');
     expect(JSON.stringify(verified)).not.toContain(teacherReset.tokenHash);
     await expect(bcrypt.compare('teacherpass', tx.user.update.mock.calls[0][0].data.passwordHash)).resolves.toBe(true);
+    expect(tx.user.update.mock.calls[0][0].data).toMatchObject({ sessionVersion: { increment: 1 }, sessions: { updateMany: { where: { revokedAt: null }, data: { revokedAt: expect.any(Date) } } } });
     expect(tx.studentProfile.update).not.toHaveBeenCalled();
   });
 

@@ -1,35 +1,16 @@
-import { IsEmail, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
+import { EmailField, PasswordField, RequiredText, TextField } from '../common/dto-fields';
+import { SettingsDto } from '../common/settings.dto';
 
 export class UpdateTeacherProfileDto {
-  @IsString()
-  name!: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @IsString()
-  @IsOptional()
-  bg?: string;
+  @RequiredText() name!: string;
+  @TextField() avatar?: string;
+  @TextField() bg?: string;
 }
-
 export class UpdateTeacherAccountDto {
-  @IsEmail()
-  email!: string;
+  @EmailField() email!: string;
 }
-
 export class ChangeTeacherPasswordDto {
-  @IsString()
-  @MinLength(6)
-  currentPassword!: string;
-
-  @IsString()
-  @MinLength(6)
-  newPassword!: string;
+  @PasswordField() currentPassword!: string;
+  @PasswordField() newPassword!: string;
 }
-
-export class UpdateTeacherNotificationsDto {
-  @IsObject()
-  @IsOptional()
-  settings?: Record<string, unknown>;
-}
+export class UpdateTeacherNotificationsDto extends SettingsDto {}

@@ -12,7 +12,7 @@ import {
 } from '../../domain/progress/index.js';
 import { formatDateLabel, formatDateTimeLabel } from '../../shared/dateTime.js';
 import { Badge, Button, Card, Section, TextArea, cx } from '../../shared/ui.jsx';
-import { ProgressHistory } from './ProgressHistory.jsx';
+import { PaginatedProgressHistory } from './PaginatedProgressHistory.jsx';
 
 const COVERAGE_OPTIONS = [
   { value: PROGRESS_COVERAGE_STATUS.NOT_STARTED, label: 'Не проходили' },
@@ -35,7 +35,7 @@ function statusTone(progress) {
   return 'blue';
 }
 
-export function StudentTaskProgressDrawer({ student, progress, onSave, isSaving }) {
+export function StudentTaskProgressDrawer({ student, progress, actions, onSave, isSaving }) {
   const [coverageStatus, setCoverageStatus] = useState(progress.coverageStatus);
   const [masteryLevel, setMasteryLevel] = useState(progress.masteryLevel || '');
   const [teacherComment, setTeacherComment] = useState(progress.teacherComment || '');
@@ -135,7 +135,7 @@ export function StudentTaskProgressDrawer({ student, progress, onSave, isSaving 
       <Button onClick={submit} disabled={isSaving || !canSave}>{isSaving ? 'Сохраняем…' : 'Сохранить оценку задания'}</Button>
 
       <Section title="История изменений" />
-      <ProgressHistory history={progress.history} />
+      <PaginatedProgressHistory student={student} actions={actions} taskNumber={progress.taskNumber} revision={progress.lastActivityAt || ''} />
     </Card>
   );
 }

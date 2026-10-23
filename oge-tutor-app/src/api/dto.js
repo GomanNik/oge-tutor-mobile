@@ -208,7 +208,7 @@ export function mapMaterialTopicDto(dto) {
   };
 }
 
-function mapProgressHistoryEventDto(dto) {
+export function mapProgressHistoryEventDto(dto) {
   if (!isRecord(dto)) return null;
   return {
     ...dto,
@@ -385,8 +385,37 @@ export function mapBackendResultDto(dto) {
   if (!isRecord(dto)) return {};
   const result = { ...dto };
   if (dto.data !== undefined) result.data = mapDataDto(dto.data);
+  if (dto.changes !== undefined) result.changes = mapResourceChangesDto(dto.changes);
   if (dto.session !== undefined) result.session = mapSessionDto(dto.session);
   return result;
+}
+
+export const RESOURCE_MAPPERS = Object.freeze({
+  students: mapStudentDto,
+  lessons: mapLessonDto,
+  homeworks: mapHomeworkDto,
+  materials: mapMaterialTopicDto,
+  notifications: mapNotificationDto,
+});
+
+export function mapResourceChangesDto(changes) {
+  if (!isRecord(changes)) throw dtoError('Invalid changes envelope.', 'changes');
+  const patch = {};
+  for (const [key, mapper] of Object.entries(RESOURCE_MAPPERS)) {
+    if (changes[key] !== undefined) patch[key] = optionalArray(changes, key, 'ChangesDto').map(mapper).filter(Boolean);
+  }
+  if (changes.teacher !== undefined) patch.teacher = mapTeacherDto(changes.teacher);
+  return patch;
+}
+
+export function mapPageDto(dto, mapper) {
+  if (!isRecord(dto) || !Array.isArray(dto.items)
+    || !Number.isInteger(dto.total) || dto.total < 0
+    || !Number.isInteger(dto.page) || dto.page < 1
+    || !Number.isInteger(dto.pageSize) || dto.pageSize < 1 || dto.pageSize > 100) {
+    throw dtoError('Invalid paginated response.', 'items');
+  }
+  return { ...dto, items: dto.items.map(mapper).filter(Boolean) };
 }
 
 export function mapApiErrorPayload(payload, status = 0, fallbackMessage = 'Backend вернул ошибку.') {

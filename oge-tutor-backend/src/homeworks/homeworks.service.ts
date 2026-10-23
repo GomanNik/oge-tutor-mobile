@@ -99,9 +99,12 @@ export class HomeworksService {
       throw conflict('Сейчас это ДЗ нельзя отправить.', { status: 'locked' });
     }
     if (!file) throw validationError('Выберите файл решения.', { file: 'required' });
-    const fileResource = await this.files.saveUploadedFile(user, file, { context: 'homework-submission' });
-    const solutionFile = cleanText(payload.fileTitle) || fileResource.originalName;
-    await this.prisma.$transaction(async (tx) => {
+    let storedPath: string | undefined;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+      const fileResource = await this.files.saveUploadedFile(user, file, { context: 'homework-submission' }, tx);
+      storedPath = fileResource.storagePath;
+      const solutionFile = cleanText(payload.fileTitle) || fileResource.originalName;
       await tx.homeworkSubmission.create({
         data: {
           homeworkId,
@@ -114,7 +117,11 @@ export class HomeworksService {
         where: { id: homeworkId },
         data: { status: HOMEWORK_STATUS.SUBMITTED, submittedAt: new Date(), reviewedAt: null, closedAt: null, solutionFile },
       });
-    });
+      });
+    } catch (error) {
+      if (storedPath) await this.files.removeStoredFile(storedPath);
+      throw error;
+    }
   }
 
   private resolveReviewStatus(payload: any) {

@@ -2,10 +2,10 @@
  * OGE Tutor App — reusable notification inbox.
  * Notifications are derived from product state and existing backend notifications.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { NOTIFICATION_TYPE } from '../api/contracts.js';
 import { formatDateTimeLabel } from './dateTime.js';
-import { Card, EmptyState, Header, RowCard, toneClass } from './ui.jsx';
+import { Badge, Button, Card, EmptyState, Header, IconButton, RowCard, SelectField, toneClass } from './ui.jsx';
 
 function notificationIcon(type) {
   if (type === NOTIFICATION_TYPE.HOMEWORK_SUBMITTED) return '✓';
@@ -18,21 +18,51 @@ function notificationIcon(type) {
   return '•';
 }
 
-export function NotificationInbox({ title = 'Уведомления', subtitle = 'События, которые требуют внимания', notifications = [], onBack, onOpen }) {
+export function NotificationInbox({ title = 'Уведомления', subtitle = 'События, которые требуют внимания', notifications = [], onBack, onOpen, onStatusChange, onReadAll }) {
+  const [filter, setFilter] = useState('active');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const visible = notifications.filter((item) => filter === 'all' || (filter === 'active' ? item.status !== 'resolved' : item.status === filter));
+  async function perform(action) {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try { await action(); } catch (err) { setError(err?.message || 'Не удалось обновить уведомление.'); }
+    finally { setBusy(false); }
+  }
   return (
     <>
       <Header title={title} subtitle={subtitle} onBack={onBack} />
-      {notifications.length ? notifications.map((item) => (
+      <div className="notification-toolbar">
+        <SelectField label="Статус уведомлений" value={filter} onChange={setFilter} options={[
+          { value: 'active', label: 'Активные' }, { value: 'unread', label: 'Непрочитанные' },
+          { value: 'read', label: 'Прочитанные' }, { value: 'resolved', label: 'Завершённые' }, { value: 'all', label: 'Все' },
+        ]} />
+        {onReadAll ? <Button variant="light" disabled={busy} onClick={() => perform(onReadAll)}>Прочитать все</Button> : null}
+      </div>
+      {error ? <div className="inline-error" role="alert">{error}</div> : null}
+      {visible.length ? visible.map((item) => (
+        <div key={item.id} className="notification-entry">
         <RowCard
-          key={item.id}
           icon={notificationIcon(item.type)}
           iconTone={item.tone || 'blue'}
           title={item.title}
           subtitle={`${item.message || 'Новое событие'}${item.createdAt ? ` · ${formatDateTimeLabel(item.createdAt)}` : ''}`}
           badge={item.actionLabel || 'Открыть'}
           badgeTone={item.tone || 'blue'}
-          onClick={() => onOpen?.(item)}
+          onClick={() => perform(async () => {
+            if (item.persisted && item.status === 'unread' && onStatusChange) await onStatusChange(item.id, 'read');
+            await onOpen?.(item);
+          })}
         />
+        <div className="notification-actions">
+          <Badge tone={item.status === 'unread' ? 'amber' : 'slate'}>{item.status === 'resolved' ? 'Завершено' : item.status === 'read' ? 'Прочитано' : 'Не прочитано'}</Badge>
+          {item.persisted && onStatusChange ? <>
+            <IconButton label={item.status === 'unread' ? 'Отметить прочитанным' : 'Отметить непрочитанным'} icon={item.status === 'unread' ? '✓' : '○'} disabled={busy} onClick={() => perform(() => onStatusChange(item.id, item.status === 'unread' ? 'read' : 'unread'))} />
+            {item.status !== 'resolved' ? <IconButton label="Завершить уведомление" icon="×" disabled={busy} onClick={() => perform(() => onStatusChange(item.id, 'resolved'))} /> : null}
+          </> : null}
+        </div>
+        </div>
       )) : (
         <EmptyState title="Новых уведомлений нет" text="Когда появятся сданные работы, просрочки, ближайшие уроки или события доступа, они будут здесь." />
       )}

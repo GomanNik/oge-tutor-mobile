@@ -8,12 +8,12 @@ import { ROLE } from '../src/common/contracts';
 const teacherUser = { id: 'u-teacher', role: ROLE.TEACHER, teacherId: 't-1', email: 'teacher@mail.ru' };
 
 describe('mutation response envelope contract', () => {
-  it('resource mutations return data envelope for frontend store replacement', async () => {
-    const bootstrap = { buildForUser: vi.fn(async () => ({ teacher: { id: 't-1' }, students: [] })) };
-    const lessons = new LessonsController({ create: vi.fn(), update: vi.fn(), complete: vi.fn() } as any, bootstrap as any);
+  it('resource mutations return changed records without rebuilding the whole cabinet', async () => {
+    const catalog = { lesson: vi.fn(async () => ({ id: 'l-1', studentId: 's-1' })) };
+    const lessons = new LessonsController({ create: vi.fn(async () => ({ id: 'l-1' })) } as any, catalog as any);
 
     await expect(lessons.create(teacherUser as any, { studentId: 's-1' } as any))
-      .resolves.toEqual({ data: { teacher: { id: 't-1' }, students: [] } });
+      .resolves.toEqual({ changes: { lessons: [{ id: 'l-1', studentId: 's-1' }] }, invalidated: ['lessons'] });
   });
 
   it('command-only mutations return ok envelope', async () => {
@@ -30,11 +30,11 @@ describe('mutation response envelope contract', () => {
         signSession: vi.fn(async () => ({ id: 't-1', userId: 'u-teacher', role: ROLE.TEACHER, email: 'teacher@mail.ru', token: 'jwt' })),
       } as any,
       { verify: vi.fn(), complete: vi.fn() } as any,
-      { buildForUser: vi.fn(async () => ({ teacher: { id: 't-1' } })) } as any,
+      { initialForUser: vi.fn(async () => ({ data: { teacher: { id: 't-1' } }, pagination: {} })) } as any,
     );
 
     await expect(auth.login({ email: 'teacher@mail.ru', password: 'secret123' }))
-      .resolves.toEqual({ session: { id: 't-1', userId: 'u-teacher', role: ROLE.TEACHER, email: 'teacher@mail.ru', token: 'jwt' }, data: { teacher: { id: 't-1' } } });
+      .resolves.toEqual({ session: { id: 't-1', userId: 'u-teacher', role: ROLE.TEACHER, email: 'teacher@mail.ru', token: 'jwt' }, data: { teacher: { id: 't-1' } }, pagination: {} });
   });
 
   it('file upload returns fileResource envelope', async () => {

@@ -113,8 +113,23 @@ model User {
   studentProfile StudentProfile?
   uploadedFiles  FileResource[]
   accessTokens   AccessToken[]
+  sessions       AuthSession[]
+  sessionVersion Int             @default(0)
 
   @@index([role])
+}
+
+model AuthSession {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   Int
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model AccessToken {

@@ -9,6 +9,7 @@ function statusToCode(status: number): string {
   if (status === 404) return 'not_found';
   if (status === 409) return 'conflict';
   if (status === 422 || status === 400) return 'validation_error';
+  if (status === 429) return 'rate_limited';
   if (status >= 500) return 'server_error';
   return 'http_error';
 }
@@ -19,6 +20,7 @@ function statusToMessage(status: number): string {
   if (status === 404) return 'Данные не найдены.';
   if (status === 409) return 'Конфликт данных. Обновите страницу и повторите действие.';
   if (status === 422 || status === 400) return 'Проверьте заполненные поля.';
+  if (status === 429) return 'Слишком много попыток. Повторите позже.';
   return 'Сервер временно недоступен.';
 }
 

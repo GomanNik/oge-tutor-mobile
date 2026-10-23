@@ -13,6 +13,9 @@ import { CreateLesson, LessonDetail } from '../src/teacher/TeacherLessons.jsx';
 import { MaterialsList } from '../src/teacher/TeacherMaterials.jsx';
 import { StudentCard } from '../src/teacher/TeacherStudents.jsx';
 import { StudentProgress } from '../src/student/StudentProgress.jsx';
+import StudentHome from '../src/student/StudentHome.jsx';
+import { StudentLessonDetail, StudentLessons } from '../src/student/StudentLessons.jsx';
+import { selectTeacherOverview } from '../src/domain/productSelectors.js';
 
 function isoOffset(days, hour = 10) {
   const date = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -103,6 +106,32 @@ afterEach(() => {
 });
 
 describe('redesigned teacher product flows', () => {
+  it('does not present an unfinished past lesson as upcoming', () => {
+    const oldLesson = { ...baseData().lessons[0], startAt: isoOffset(-1), endAt: isoOffset(-1, 11) };
+    const futureLesson = baseData().lessons[0];
+
+    expect(selectTeacherOverview(baseData({ lessons: [oldLesson] })).nearestLesson).toBeNull();
+
+    render(React.createElement(StudentHome, {
+      student: baseStudent(), lessons: [oldLesson], homeworks: [], onNavigate: vi.fn(), openWeakTask: vi.fn(),
+    }));
+    expect(screen.getByText('Пока нет запланированных уроков')).toBeTruthy();
+    expect(screen.queryByText('planned')).toBeNull();
+    cleanup();
+
+    render(React.createElement(StudentLessons, {
+      lessons: [oldLesson, { ...futureLesson, id: 'l-2', topic: 'Будущий урок' }], openLesson: vi.fn(),
+    }));
+    expect(screen.getByText('Прошедшие без отметки')).toBeTruthy();
+    expect(screen.getByText('Не отмечен')).toBeTruthy();
+    expect(screen.getByText('Запланирован')).toBeTruthy();
+    expect(screen.getByText('Будущий урок · 1 материал')).toBeTruthy();
+    cleanup();
+
+    render(React.createElement(StudentLessonDetail, { lesson: oldLesson, onBack: vi.fn() }));
+    expect(screen.getByText('Не отмечен')).toBeTruthy();
+  });
+
   it('answers what the teacher should do today on the dashboard', () => {
     const today = new Date();
     today.setHours(18, 0, 0, 0);
@@ -165,6 +194,23 @@ describe('redesigned teacher product flows', () => {
     render(React.createElement(LessonDetail, { data, actions: {}, lessonId: 'l-1', onBack: vi.fn(), openMode: vi.fn() }));
     expect(screen.getByRole('button', { name: 'Проведён' }).disabled).toBe(true);
     expect(screen.getByText(/Будущий урок нельзя отметить проведённым/)).toBeTruthy();
+  });
+
+  it('loads paginated progress history from the student card', async () => {
+    const progressHistory = vi.fn(async () => ({
+      items: [{ id: 'history-1', taskNumber: 6, coverageStatus: 'assessment_needed', masteryLevel: null, source: 'lesson_completed', createdAt: new Date().toISOString(), comment: 'После урока' }],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    }));
+    render(React.createElement(StudentCard, {
+      data: baseData(), actions: { progressHistory }, studentId: 's-1',
+      openMode: vi.fn(), openHomework: vi.fn(), openLesson: vi.fn(), onBack: vi.fn(),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'История' }));
+    expect(await screen.findByText(/Задание 6:/)).toBeTruthy();
+    expect(progressHistory).toHaveBeenCalledWith('s-1', expect.objectContaining({ page: 1, pageSize: 25 }));
   });
 
   it('shows material detail actions and usage without exposing technical URLs as row text', () => {

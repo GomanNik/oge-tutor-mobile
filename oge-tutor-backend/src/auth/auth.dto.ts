@@ -1,29 +1,15 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { EmailField, PasswordField, RequiredText } from '../common/dto-fields';
 
 export class LoginDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(6)
-  password!: string;
+  @EmailField() email!: string;
+  @PasswordField() password!: string;
 }
-
 export class PasswordResetDto {
-  @IsEmail()
-  email!: string;
+  @EmailField() email!: string;
 }
-
 export class AccessTokenVerifyDto {
-  @IsString()
-  token!: string;
+  @RequiredText() token!: string;
 }
-
-export class AccessTokenCompleteDto {
-  @IsString()
-  token!: string;
-
-  @IsString()
-  @MinLength(6)
-  password!: string;
+export class AccessTokenCompleteDto extends AccessTokenVerifyDto {
+  @PasswordField() password!: string;
 }

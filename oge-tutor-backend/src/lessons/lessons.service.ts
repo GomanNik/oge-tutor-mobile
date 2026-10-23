@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
 import { LESSON_SOURCE, LESSON_STATUS, LessonSource, LessonStatus, NOTIFICATION_STATUS, NOTIFICATION_TYPE, PROGRESS_COVERAGE_STATUS, PROGRESS_SOURCE, ROLE } from '../common/contracts';
@@ -17,29 +18,38 @@ export class LessonsService {
     return user.teacherId;
   }
 
-  async assertStudentBelongsToTeacher(teacherId: string, studentId: string) {
-    const student = await this.prisma.studentProfile.findFirst({ where: { id: studentId, teacherId } });
+  private withTeacherLock<T>(teacherId: string, action: (tx: Prisma.TransactionClient) => Promise<T>) {
+    return this.prisma.$transaction(async (tx) => {
+      // Lock even an empty schedule; all lesson mutations share this lock.
+      const teachers = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "TeacherProfile" WHERE "id" = ${teacherId} FOR UPDATE`;
+      if (!teachers.length) throw notFound('Преподаватель не найден.');
+      return action(tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  async assertStudentBelongsToTeacher(teacherId: string, studentId: string, tx: Prisma.TransactionClient = this.prisma) {
+    const student = await tx.studentProfile.findFirst({ where: { id: studentId, teacherId } });
     if (!student) throw notFound('Ученик не найден.');
     return student;
   }
 
-  async assertLessonBelongsToTeacher(teacherId: string, lessonId: string) {
-    const lesson = await this.prisma.lesson.findFirst({ where: { id: lessonId, teacherId } });
+  async assertLessonBelongsToTeacher(teacherId: string, lessonId: string, tx: Prisma.TransactionClient = this.prisma) {
+    const lesson = await tx.lesson.findFirst({ where: { id: lessonId, teacherId } });
     if (!lesson) throw notFound('Урок не найден.');
     return lesson;
   }
 
-  async assertNoConflict(studentId: string, startAt: Date, endAt: Date, lessonId?: string) {
-    const conflictLesson = await this.prisma.lesson.findFirst({
+  private async assertNoConflict(tx: Prisma.TransactionClient, teacherId: string, startAt: Date, endAt: Date, lessonId?: string) {
+    const conflictLesson = await tx.lesson.findFirst({
       where: {
-        studentId,
+        teacherId,
         id: lessonId ? { not: lessonId } : undefined,
         status: { in: ACTIVE_LESSON_STATUSES },
         startAt: { lt: endAt },
         endAt: { gt: startAt },
       },
     });
-    if (conflictLesson) throw conflict('У ученика уже есть занятие в это время.', { startAt: 'lesson_conflict' });
+    if (conflictLesson) throw conflict('У преподавателя уже есть занятие в это время.', { startAt: 'lesson_conflict' });
   }
 
   private parseLessonSource(value: unknown): LessonSource {
@@ -51,14 +61,16 @@ export class LessonsService {
   async create(user: AuthUser, payload: any) {
     const teacherId = this.assertTeacher(user);
     const studentId = requireText(payload.studentId, 'studentId');
-    await this.assertStudentBelongsToTeacher(teacherId, studentId);
     const startAt = parseIsoDate(payload.startAt, 'startAt');
     const endAt = parseIsoDate(payload.endAt, 'endAt');
     const durationMinutes = assertLessonInterval(startAt, endAt);
     assertFutureDate(startAt, 'startAt');
-    await this.assertNoConflict(studentId, startAt, endAt);
     const materials = await this.files.normalizeEmbeddedAttachments(user, payload.materials, 'materials');
-    return this.prisma.lesson.create({
+    return this.withTeacherLock(teacherId, async (tx) => {
+      await this.assertStudentBelongsToTeacher(teacherId, studentId, tx);
+      assertFutureDate(startAt, 'startAt');
+      await this.assertNoConflict(tx, teacherId, startAt, endAt);
+      return tx.lesson.create({
       data: {
         teacherId,
         studentId,
@@ -73,23 +85,24 @@ export class LessonsService {
         note: cleanText(payload.note),
         materials,
       },
+      });
     });
   }
 
   async update(user: AuthUser, lessonId: string, patch: any) {
     const teacherId = this.assertTeacher(user);
-    const lesson = await this.assertLessonBelongsToTeacher(teacherId, lessonId);
+    return this.withTeacherLock(teacherId, async (tx) => {
+    const lesson = await this.assertLessonBelongsToTeacher(teacherId, lessonId, tx);
     const studentId = patch.studentId !== undefined && cleanText(patch.studentId) !== lesson.studentId
       ? requireText(patch.studentId, 'studentId')
       : lesson.studentId;
-    if (studentId !== lesson.studentId) await this.assertStudentBelongsToTeacher(teacherId, studentId);
+    if (studentId !== lesson.studentId) await this.assertStudentBelongsToTeacher(teacherId, studentId, tx);
     const startAt = patch.startAt !== undefined ? parseIsoDate(patch.startAt, 'startAt') : lesson.startAt;
     const endAt = patch.endAt !== undefined ? parseIsoDate(patch.endAt, 'endAt') : lesson.endAt;
     const durationMinutes = assertLessonInterval(startAt, endAt);
     const scheduleChanged = studentId !== lesson.studentId || patch.startAt !== undefined || patch.endAt !== undefined;
     if (scheduleChanged) {
       assertFutureDate(startAt, 'startAt');
-      await this.assertNoConflict(studentId, startAt, endAt, lessonId);
     }
     const materials = patch.materials !== undefined
       ? await this.files.normalizeEmbeddedAttachments(user, patch.materials, 'materials')
@@ -100,7 +113,11 @@ export class LessonsService {
       throw validationError('Завершайте урок через действие completeLesson.', { status: 'use_complete_endpoint' });
     }
     if (status && !Object.values(LESSON_STATUS).includes(status as any)) throw validationError('Некорректный статус урока.', { status: 'invalid' });
-    return this.prisma.lesson.update({
+    const nextStatus = (status || lesson.status) as LessonStatus;
+    if (ACTIVE_LESSON_STATUSES.includes(nextStatus) && (scheduleChanged || nextStatus !== lesson.status)) {
+      await this.assertNoConflict(tx, teacherId, startAt, endAt, lessonId);
+    }
+    return tx.lesson.update({
       where: { id: lessonId },
       data: {
         studentId: studentId !== lesson.studentId ? studentId : undefined,
@@ -116,21 +133,25 @@ export class LessonsService {
         materials,
       },
     });
+    });
   }
 
   async complete(user: AuthUser, lessonId: string, payload: any) {
     const teacherId = this.assertTeacher(user);
-    const lesson = await this.assertLessonBelongsToTeacher(teacherId, lessonId);
+    return this.withTeacherLock(teacherId, async (tx) => {
+    const lesson = await this.assertLessonBelongsToTeacher(teacherId, lessonId, tx);
     if (!ACTIVE_LESSON_STATUSES.includes(lesson.status as any)) {
       throw conflict('Завершить можно только активный запланированный урок.', { status: 'invalid_status' });
     }
     const completedAt = new Date();
+    if (lesson.startAt > completedAt) {
+      throw validationError('Будущий урок нельзя отметить проведённым до его начала.', { startAt: 'future_date' });
+    }
     const comment = cleanText(payload?.completionComment || payload?.comment);
     const focusTaskNumbers = payload?.focusTaskNumbers !== undefined
       ? parseOptionalTaskNumbers(payload.focusTaskNumbers, 'focusTaskNumbers')
       : (lesson.focusTaskNumbers || []);
 
-    return this.prisma.$transaction(async (tx) => {
       await tx.lesson.update({
         where: { id: lessonId },
         data: {

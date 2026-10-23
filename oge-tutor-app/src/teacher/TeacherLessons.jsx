@@ -20,7 +20,7 @@ import {
 } from '../shared/dateTime.js';
 import { formatMaterialCount, parseTaskNumberInput } from '../shared/formatters.js';
 import { Badge, Button, Card, EmptyState, Field, Header, MaterialList, RowCard, Section, SelectField, TextArea, cx, iconByStatus, toneByStatus } from '../shared/ui.jsx';
-import { isSameDayIso, isWithinNextDaysIso } from '../domain/productSelectors.js';
+import { isSameDayIso, isUpcomingLesson, isWithinNextDaysIso } from '../domain/productSelectors.js';
 
 const getStudent = selectStudent;
 const getLesson = selectLesson;
@@ -110,7 +110,7 @@ export function ScheduleScreen({ data, openCreate, openLesson }) {
   const now = new Date();
   const filtered = baseList.filter((lesson) => {
     if (studentFilter !== 'all' && lesson.studentId !== studentFilter) return false;
-    if (statusFilter === 'active' && !ACTIVE_LESSON_STATUSES.includes(lesson.status)) return false;
+    if (statusFilter === 'active' && !isUpcomingLesson(lesson, now)) return false;
     if (statusFilter === 'history' && !HISTORY_LESSON_STATUSES.includes(lesson.status)) return false;
     if (statusFilter !== 'all' && statusFilter !== 'active' && statusFilter !== 'history' && lesson.status !== statusFilter) return false;
     if (view === 'day') return isSameDayIso(lesson.startAt, now);

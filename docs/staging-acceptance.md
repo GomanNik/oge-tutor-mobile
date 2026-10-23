@@ -45,10 +45,12 @@ Expected: setup form opens, token verification masks email, password activates t
 - Try to create a lesson in the past.
 - Create a future lesson for the student.
 - Try to create an overlapping lesson.
+- Try to create an overlapping lesson for a different student of the same teacher.
+- Try to complete a future lesson.
 - Complete the lesson with OGE task numbers.
 - Try to complete the same lesson again.
 
-Expected: past and overlapping lessons are rejected; completion updates lesson status, progress history and assessment notification once.
+Expected: past lessons, teacher schedule conflicts and future completion are rejected; valid completion updates lesson status, progress history and assessment notification once.
 
 ## Homework
 
@@ -68,8 +70,18 @@ Expected: lifecycle transitions are enforced; review updates progress and notifi
 - Download it as the assigned student through the guarded frontend flow.
 - Download a submitted solution as the teacher.
 - Try to download another teacher's/student's private file.
+- Upload a binary file renamed to `.pdf` and confirm rejection.
 
 Expected: allowed downloads include auth, forbidden downloads return `403`, and the frontend uses guarded fetch for protected file URLs.
+
+## Paged Reads And Notifications
+
+- Create enough records for a second page and compare `/students?page=1&pageSize=1` and `page=2`.
+- Open a student's progress history; filter by task and date, then load another page.
+- Mark an assessment notification read, unread and resolved; use read-all as the teacher.
+- Confirm the teacher cannot see another teacher's records and a student cannot update assessment notifications.
+
+Expected: totals and pages update after mutations, history is scoped, and notification actions persist.
 
 ## Password Reset
 
@@ -77,9 +89,10 @@ Expected: allowed downloads include auth, forbidden downloads return `403`, and 
 - Open the dev preview link.
 - Set a new password.
 - Try to reuse the reset token.
+- Check an old JWT after reset, and check the new JWT after logout.
 - Request reset for disabled and unknown users.
 
-Expected: active user receives a dev preview locally, reused token is rejected, disabled/unknown paths return a generic `{ ok: true }` without activation or account disclosure.
+Expected: active user receives a dev preview locally, reused token is rejected, old sessions return `401`, and disabled/unknown paths return a generic `{ ok: true }` without activation or account disclosure.
 
 ## Automated Coverage
 

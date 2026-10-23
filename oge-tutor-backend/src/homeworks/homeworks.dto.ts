@@ -1,87 +1,28 @@
-import { IsArray, IsISO8601, IsOptional, IsString } from 'class-validator';
+import { PartialType } from '@nestjs/swagger';
+import { AttachmentDto } from '../common/attachment.dto';
+import { HOMEWORK_REVIEW_ACTION, HOMEWORK_STATUS } from '../common/contracts';
+import { DateField, EnumField, NestedArrayField, RequiredText, TaskNumbersField, TextField } from '../common/dto-fields';
 
 export class CreateHomeworkDto {
-  @IsString()
-  studentId!: string;
-
-  @IsString()
-  title!: string;
-
-  @IsString()
-  @IsOptional()
-  description?: string;
-
-  @IsString()
-  @IsOptional()
-  topic?: string;
-
-  @IsArray()
-  taskNumbers!: number[];
-
-  @IsISO8601()
-  dueAt!: string;
-
-  @IsArray()
-  @IsOptional()
-  materials?: unknown[];
+  @RequiredText() studentId!: string;
+  @RequiredText() title!: string;
+  @TextField() description?: string;
+  @TextField() topic?: string;
+  @TaskNumbersField(true) taskNumbers!: number[];
+  @DateField(true) dueAt!: string;
+  @NestedArrayField(AttachmentDto) materials?: AttachmentDto[];
 }
-
-export class UpdateHomeworkDto {
-  @IsString()
-  @IsOptional()
-  studentId?: string;
-
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsOptional()
-  description?: string;
-
-  @IsString()
-  @IsOptional()
-  topic?: string;
-
-  @IsArray()
-  @IsOptional()
-  taskNumbers?: number[];
-
-  @IsISO8601()
-  @IsOptional()
-  dueAt?: string;
-
-  @IsString()
-  @IsOptional()
-  status?: string;
-
-  @IsArray()
-  @IsOptional()
-  materials?: unknown[];
+export class UpdateHomeworkDto extends PartialType(CreateHomeworkDto, { skipNullProperties: false }) {
+  @EnumField(HOMEWORK_STATUS) status?: string;
 }
-
 export class ReviewHomeworkDto {
-  @IsString()
-  @IsOptional()
-  status?: string;
-
-  @IsString()
-  @IsOptional()
-  action?: string;
-
-  @IsString()
-  @IsOptional()
-  reviewAction?: string;
-
-  @IsString()
-  @IsOptional()
-  comment?: string;
-
-  @IsString()
-  @IsOptional()
-  teacherComment?: string;
-
-  @IsArray()
-  @IsOptional()
-  reviewMaterials?: unknown[];
+  @EnumField([HOMEWORK_STATUS.REVIEWED, HOMEWORK_STATUS.NEEDS_REVISION]) status?: string;
+  @EnumField(HOMEWORK_REVIEW_ACTION) action?: string;
+  @EnumField(HOMEWORK_REVIEW_ACTION) reviewAction?: string;
+  @TextField(false, { description: 'Alias for teacherComment.' }) comment?: string;
+  @TextField() teacherComment?: string;
+  @NestedArrayField(AttachmentDto) reviewMaterials?: AttachmentDto[];
+}
+export class SubmitHomeworkDto {
+  @TextField() fileTitle?: string;
 }

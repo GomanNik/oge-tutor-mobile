@@ -2,7 +2,7 @@
  * OGE Tutor App — backend-backed application store.
  * The store keeps resources separately and lets screens receive only the resources needed for the current role.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApiClient } from '../api/apiClient.js';
 import { STUDENT_ACCESS_ACTION } from '../api/contracts.js';
 import { getErrorMessage } from '../api/apiError.js';
@@ -15,6 +15,7 @@ import {
   mapNotificationDto,
   mapStudentDto,
   mapTeacherDto,
+  mapResourceChangesDto,
 } from '../api/dto.js';
 
 const EMPTY_RESOURCES = Object.freeze({
@@ -72,11 +73,24 @@ function mergeResourcePatch(previous, patch) {
 }
 
 function resourcePatchFromBulkResult(result) {
+  if (result.changes !== undefined) {
+    const changes = mapResourceChangesDto(result.changes);
+    return (previous) => {
+      const next = { ...previous };
+      Object.entries(changes).forEach(([key, value]) => {
+        next[key] = key === 'teacher' ? value : value.reduce(upsertById, previous[key]);
+      });
+      Object.entries(result.removals || {}).forEach(([key, ids]) => {
+        if (Array.isArray(next[key]) && Array.isArray(ids)) next[key] = next[key].filter((item) => !ids.includes(item.id));
+      });
+      return next;
+    };
+  }
   if (result.data !== undefined) return { mode: 'replace', patch: resourcesFromData(result.data) };
   if (result.resources && typeof result.resources === 'object') return { mode: 'merge', patch: mapResourcePartial(result.resources) };
 
   const patch = mapResourcePartial(result);
-  return Object.keys(patch).length ? { mode: 'merge', patch: mergeResourcePatch(EMPTY_RESOURCES, patch) } : null;
+  return Object.keys(patch).length ? { mode: 'merge', patch } : null;
 }
 
 function singularPatchApplier(result) {
@@ -127,30 +141,98 @@ export function useBackendStore() {
   const [loading, setLoading] = useState(true);
   const [busyCount, setBusyCount] = useState(0);
   const [error, setError] = useState('');
+  const [pagination, setPagination] = useState({});
+  const resourcesRef = useRef(EMPTY_RESOURCES);
+  const paginationRef = useRef({});
+  const generation = useRef(0);
+  const requests = useRef({});
+  const refreshVersion = useRef({});
+
+  const updateResources = useCallback((update) => {
+    resourcesRef.current = typeof update === 'function' ? update(resourcesRef.current) : update;
+    setResources(resourcesRef.current);
+  }, []);
+
+  const updatePagination = useCallback((update) => {
+    paginationRef.current = typeof update === 'function' ? update(paginationRef.current) : update;
+    setPagination(paginationRef.current);
+  }, []);
 
   const busy = busyCount > 0;
 
-  function resetAuthState() {
+  const resetAuthState = useCallback(() => {
+    generation.current += 1;
+    requests.current = {};
+    refreshVersion.current = {};
     setSession(null);
-    setResources(EMPTY_RESOURCES);
-  }
+    updateResources(EMPTY_RESOURCES);
+    updatePagination({});
+  }, [updateResources, updatePagination]);
 
-  function applyResult(result) {
+  const applyResult = useCallback((result) => {
     const nextPatch = resourcePatchFromResult(result);
     if (typeof nextPatch === 'function') {
-      setResources((previous) => nextPatch(previous));
+      updateResources((previous) => nextPatch(previous));
     } else if (nextPatch?.mode === 'replace') {
-      setResources(nextPatch.patch);
+      updateResources(nextPatch.patch);
+      updatePagination(result.pagination || {});
     } else if (nextPatch?.mode === 'merge') {
-      setResources((previous) => mergeResourcePatch(previous, nextPatch.patch));
+      updateResources((previous) => mergeResourcePatch(previous, nextPatch.patch));
     }
 
     if ('session' in (result || {})) {
       const nextSession = result.session || null;
       setSession(nextSession);
-      if (!nextSession) setResources(EMPTY_RESOURCES);
+      if (!nextSession) resetAuthState();
     }
-  }
+  }, [updateResources, updatePagination, resetAuthState]);
+
+  const refreshCollection = useCallback(async (key) => {
+    const meta = paginationRef.current[key];
+    if (!meta || !api.list) return;
+    const epoch = generation.current;
+    const version = (refreshVersion.current[key] || 0) + 1;
+    refreshVersion.current[key] = version;
+    updatePagination((previous) => ({ ...previous, [key]: { ...previous[key], loading: true, error: '' } }));
+    try {
+      const pages = await Promise.all(Array.from({ length: meta.page }, (_, index) => api.list(key, { page: index + 1, pageSize: meta.pageSize })));
+      if (epoch !== generation.current || version !== refreshVersion.current[key]) return;
+      const items = [...new Map(pages.flatMap((page) => page.items).map((item) => [item.id, item])).values()];
+      updateResources((previous) => ({ ...previous, [key]: items }));
+      updatePagination((previous) => ({ ...previous, [key]: { page: meta.page, pageSize: meta.pageSize, total: pages[0].total, loading: false, error: '' } }));
+    } catch (err) {
+      if (epoch !== generation.current || version !== refreshVersion.current[key]) return;
+      if (isUnauthorizedApiError(err)) resetAuthState();
+      else updatePagination((previous) => ({ ...previous, [key]: { ...previous[key], loading: false, error: getErrorMessage(err), needsRefresh: true } }));
+    }
+  }, [api, resetAuthState, updatePagination, updateResources]);
+
+  const loadMore = useCallback(async (key) => {
+    if (requests.current[key]) return requests.current[key];
+    const meta = paginationRef.current[key];
+    if (!meta || meta.loading || !api.list) return;
+    if (meta.needsRefresh) return refreshCollection(key);
+    if (meta.page * meta.pageSize >= meta.total) return;
+    const epoch = generation.current;
+    const version = refreshVersion.current[key] || 0;
+    updatePagination((previous) => ({ ...previous, [key]: { ...meta, loading: true, error: '' } }));
+    const pending = (async () => {
+      try {
+        const page = await api.list(key, { page: meta.page + 1, pageSize: meta.pageSize });
+        if (epoch !== generation.current || version !== (refreshVersion.current[key] || 0)) return;
+        updateResources((previous) => ({ ...previous, [key]: [...new Map([...previous[key], ...page.items].map((item) => [item.id, item])).values()] }));
+        updatePagination((previous) => ({ ...previous, [key]: { page: page.page, pageSize: page.pageSize, total: page.total, loading: false, error: '' } }));
+      } catch (err) {
+        if (epoch !== generation.current) return;
+        if (isUnauthorizedApiError(err)) resetAuthState();
+        else updatePagination((previous) => ({ ...previous, [key]: { ...meta, loading: false, error: getErrorMessage(err) } }));
+      } finally {
+        if (epoch === generation.current) delete requests.current[key];
+      }
+    })();
+    requests.current[key] = pending;
+    return pending;
+  }, [api, refreshCollection, resetAuthState, updatePagination, updateResources]);
 
   useEffect(() => {
     let alive = true;
@@ -178,28 +260,56 @@ export function useBackendStore() {
 
     load();
     return () => { alive = false; };
-  }, [api]);
+  }, [api, applyResult, resetAuthState]);
 
   const run = useCallback(async function run(operation, options = {}) {
     const { globalError = true } = options;
+    const epoch = generation.current;
     try {
       setBusyCount((value) => value + 1);
       if (globalError) setError('');
       if (api.__configurationError) throw api.__configurationError;
       const result = await operation();
+      if (epoch !== generation.current) return result;
       applyResult(result);
+      if (result?.invalidated) await Promise.all(result.invalidated.map(refreshCollection));
       return result;
     } catch (err) {
       const message = getErrorMessage(err);
-      if (isUnauthorizedApiError(err)) resetAuthState();
-      if (globalError) setError(message);
+      if (epoch === generation.current) {
+        if (isUnauthorizedApiError(err)) resetAuthState();
+        if (globalError) setError(message);
+      }
       throw err;
     } finally {
       setBusyCount((value) => Math.max(0, value - 1));
     }
-  }, [api]);
+  }, [api, applyResult, refreshCollection, resetAuthState]);
+
+  const read = useCallback(async (operation) => {
+    const epoch = generation.current;
+    try {
+      const result = await operation();
+      if (epoch !== generation.current) throw new Error('Сессия изменилась.');
+      return result;
+    } catch (err) {
+      if (epoch === generation.current && isUnauthorizedApiError(err)) resetAuthState();
+      throw err;
+    }
+  }, [resetAuthState]);
 
   const actions = useMemo(() => ({
+    loadMore,
+    list: api.list ? (key, filters) => read(() => api.list(key, filters)) : undefined,
+    progressHistory: api.progressHistory ? (studentId, filters) => read(() => api.progressHistory(studentId, filters)) : undefined,
+    loadDetail: async (key, id) => {
+      if (!api.detail) return resourcesRef.current[key]?.find((item) => item.id === id);
+      const result = await read(() => api.detail(key, id));
+      updateResources((previous) => ({ ...previous, [key]: upsertById(previous[key], result.item) }));
+      return result.item;
+    },
+    updateNotification: api.updateNotification ? (id, status) => run(() => api.updateNotification(id, status), { globalError: false }) : undefined,
+    readAllNotifications: api.readAllNotifications ? () => run(() => api.readAllNotifications(), { globalError: false }) : undefined,
     updateTeacherProfile: (patch) => run(() => api.updateTeacherProfile(patch)),
     updateTeacherAccount: (payload) => run(() => api.updateTeacherAccount(payload)),
     changeTeacherPassword: (payload) => run(() => api.changeTeacherPassword(payload)),
@@ -231,7 +341,7 @@ export function useBackendStore() {
     addMaterial: (payload) => run(() => api.addMaterial(payload)),
     updateMaterialFile: (topicId, fileId, payload) => run(() => api.updateMaterialFile(topicId, fileId, payload)),
     removeMaterialFile: (topicId, fileId) => run(() => api.removeMaterialFile(topicId, fileId)),
-  }), [api, run]);
+  }), [api, run, loadMore, read, updateResources]);
 
   const authActions = useMemo(() => ({
     login: (email, password) => run(() => api.login({ email, password }), { globalError: false }),
@@ -242,7 +352,7 @@ export function useBackendStore() {
   }), [api, run]);
 
   return {
-    resources: session ? resources : null,
+    resources: session ? { ...resources, pagination } : null,
     session,
     loading,
     busy,

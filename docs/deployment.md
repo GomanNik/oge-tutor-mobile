@@ -23,6 +23,7 @@ Services:
 - `frontend`: serves the Vite static build through nginx.
 
 Uploads are stored in the `oge_tutor_uploads` Docker volume.
+Back up both PostgreSQL and uploads before upgrades; see [Backups and Restore Checks](backups.md).
 
 ## Production Migrations
 
@@ -34,6 +35,7 @@ pnpm --dir oge-tutor-backend exec prisma migrate status
 ```
 
 Do not use `prisma migrate dev` for production. Seed is not run automatically by Compose, CI or deploy.
+The auth-session migration must be applied before deploying the new backend. Sessions issued by older versions have no session ID and will require users to log in again after the rollout.
 
 ## First Teacher Bootstrap
 
@@ -74,6 +76,16 @@ GET /health/ready
 ```
 
 `/health/ready` checks database connectivity.
+
+## Authentication Rate Limits
+
+Login, password reset, and access-token endpoints return HTTP `429` after repeated requests. Limits apply per IP and per normalized email or token. The built-in limiter stores counters in the backend process, which is appropriate for this single-instance Compose deployment. A multi-replica deployment needs shared rate-limit storage and trusted reverse-proxy IP configuration.
+
+Logout revokes the presented JWT. Changing a password or completing a reset revokes all existing sessions for that account.
+
+## Scheduled Backups
+
+The repository provides a systemd timer installer, a verified database/uploads backup, retention, and a freshness check. See [Database and Upload Backups](backups.md). Installing the script in the checkout does **not** activate a timer: installation on the actual VPS requires root, Docker access for the deployment user, enough storage, and an explicit `--enable`. Keep an encrypted offsite copy separately.
 
 ## VPS Deployment
 

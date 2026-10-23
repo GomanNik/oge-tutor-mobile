@@ -1,59 +1,16 @@
-import { Allow, IsObject, IsOptional, IsString } from 'class-validator';
+import { PartialType } from '@nestjs/swagger';
+import { AttachmentDto } from '../common/attachment.dto';
+import { MATERIAL_TYPE } from '../common/contracts';
+import { EnumField, NestedField, TaskNumberField, TextField } from '../common/dto-fields';
 
 export class AddMaterialDto {
-  @Allow()
-  taskNumber!: unknown;
-
-  @IsString()
-  @IsOptional()
-  topicTitle?: string;
-
-  @IsString()
-  type!: string;
-
-  @IsString()
-  @IsOptional()
-  fileId?: string;
-
-  @IsString()
-  @IsOptional()
-  url?: string;
-
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsObject()
-  @IsOptional()
-  item?: Record<string, unknown>;
+  @TaskNumberField() taskNumber!: number;
+  @TextField() topicTitle?: string;
+  @EnumField(MATERIAL_TYPE, true) type!: string;
+  @TextField() fileId?: string;
+  @TextField() url?: string;
+  @TextField() title?: string;
+  @TextField() fileName?: string;
+  @NestedField(AttachmentDto) item?: AttachmentDto;
 }
-
-export class UpdateMaterialFileDto {
-  @Allow()
-  @IsOptional()
-  taskNumber?: unknown;
-
-  @IsString()
-  @IsOptional()
-  topicTitle?: string;
-
-  @IsString()
-  @IsOptional()
-  title?: string;
-
-  @IsString()
-  @IsOptional()
-  type?: string;
-
-  @IsString()
-  @IsOptional()
-  fileId?: string;
-
-  @IsString()
-  @IsOptional()
-  url?: string;
-
-  @IsObject()
-  @IsOptional()
-  item?: Record<string, unknown>;
-}
+export class UpdateMaterialFileDto extends PartialType(AddMaterialDto, { skipNullProperties: false }) {}

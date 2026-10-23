@@ -14,6 +14,7 @@ import { CreateLesson, LessonDetail, ScheduleScreen } from './TeacherLessons.jsx
 import { CreateHomework, HomeworkDetail, HomeworkList } from './TeacherHomework.jsx';
 import { MaterialsList, UploadMaterial } from './TeacherMaterials.jsx';
 import TeacherProfile from './TeacherProfile.jsx';
+import { CollectionPagination } from '../shared/PaginationControls.jsx';
 
 export default function TeacherApp({ data, actions, onLogout }) {
   const [screen, setScreen] = useState(TEACHER_ROUTE.HOME);
@@ -22,7 +23,22 @@ export default function TeacherApp({ data, actions, onLogout }) {
   const [lessonId, setLessonId] = useState(null);
   const [homeworkId, setHomeworkId] = useState(null);
   const [context, setContext] = useState({});
-  const notifications = deriveTeacherNotifications(data);
+  const [navigationError, setNavigationError] = useState('');
+  const [opening, setOpening] = useState(false);
+  const notifications = deriveTeacherNotifications(data, new Date(), { includeResolved: true });
+  const activeNotifications = notifications.filter((item) => item.status !== 'resolved');
+
+  async function fetchDetail(resource, id) {
+    setNavigationError('');
+    setOpening(true);
+    try {
+      await actions.loadDetail?.(resource, id);
+      return true;
+    } catch (error) {
+      setNavigationError(error.message || 'Не удалось загрузить запись.');
+      return false;
+    } finally { setOpening(false); }
+  }
 
   function clearDetails() {
     setMode(null);
@@ -37,7 +53,8 @@ export default function TeacherApp({ data, actions, onLogout }) {
     setScreen(next);
   }
 
-  function openStudent(id) {
+  async function openStudent(id) {
+    if (!(await fetchDetail('students', id))) return;
     setScreen(TEACHER_ROUTE.STUDENTS);
     setStudentId(id);
     setMode(null);
@@ -46,7 +63,8 @@ export default function TeacherApp({ data, actions, onLogout }) {
     setContext({});
   }
 
-  function openLesson(id) {
+  async function openLesson(id) {
+    if (!(await fetchDetail('lessons', id))) return;
     setScreen(TEACHER_ROUTE.SCHEDULE);
     setLessonId(id);
     setMode(null);
@@ -55,7 +73,8 @@ export default function TeacherApp({ data, actions, onLogout }) {
     setContext({});
   }
 
-  function openHomework(id) {
+  async function openHomework(id) {
+    if (!(await fetchDetail('homeworks', id))) return;
     setScreen(TEACHER_ROUTE.HOMEWORK);
     setHomeworkId(id);
     setMode(null);
@@ -75,15 +94,13 @@ export default function TeacherApp({ data, actions, onLogout }) {
 
   function openNotification(item) {
     if (item.homeworkId) {
-      openHomework(item.homeworkId);
-      return;
+      return openHomework(item.homeworkId);
     }
     if (item.lessonId) {
-      openLesson(item.lessonId);
-      return;
+      return openLesson(item.lessonId);
     }
     if (item.studentId) {
-      openStudent(item.studentId);
+      return openStudent(item.studentId);
     }
   }
 
@@ -93,21 +110,25 @@ export default function TeacherApp({ data, actions, onLogout }) {
       active={screen === TEACHER_ROUTE.NOTIFICATIONS ? TEACHER_ROUTE.HOME : screen}
       onNavigate={navigate}
       topTitle="Преподаватель"
-      noticeCount={notifications.length}
+      noticeCount={notifications.filter((item) => item.status === 'unread').length}
       onOpenNotifications={() => navigate(TEACHER_ROUTE.NOTIFICATIONS)}
     >
+      {opening ? <p role="status" className="subtitle">Загрузка записи…</p> : null}
+      {navigationError ? <div className="inline-error" role="alert">{navigationError}</div> : null}
       {screen === TEACHER_ROUTE.NOTIFICATIONS ? (
         <NotificationInbox
           notifications={notifications}
           onBack={() => navigate(TEACHER_ROUTE.HOME)}
           onOpen={openNotification}
+          onStatusChange={actions.updateNotification}
+          onReadAll={actions.readAllNotifications}
         />
       ) : null}
 
       {screen === TEACHER_ROUTE.HOME && !mode ? (
         <TeacherHome
           data={data}
-          notifications={notifications}
+          notifications={activeNotifications}
           openStudent={openStudent}
           openLesson={openLesson}
           openHomework={openHomework}
@@ -121,6 +142,7 @@ export default function TeacherApp({ data, actions, onLogout }) {
         <StudentCard
           data={data}
           actions={actions}
+          key={studentId}
           studentId={studentId}
           openMode={openMode}
           openHomework={openHomework}
@@ -164,6 +186,18 @@ export default function TeacherApp({ data, actions, onLogout }) {
       ) : null}
 
       {screen === TEACHER_ROUTE.PROFILE ? <TeacherProfile data={data} actions={actions} onLogout={onLogout} /> : null}
+      {screen === TEACHER_ROUTE.NOTIFICATIONS ? <CollectionPagination data={data} actions={actions} resource="notifications" label="уведомлений" /> : null}
+      {screen === TEACHER_ROUTE.STUDENTS && !studentId && !mode ? <CollectionPagination data={data} actions={actions} resource="students" label="учеников" /> : null}
+      {screen === TEACHER_ROUTE.SCHEDULE && !lessonId && !mode ? <CollectionPagination data={data} actions={actions} resource="lessons" label="уроков" /> : null}
+      {screen === TEACHER_ROUTE.HOMEWORK && !homeworkId && !mode ? <CollectionPagination data={data} actions={actions} resource="homeworks" label="домашних заданий" /> : null}
+      {screen === TEACHER_ROUTE.MATERIALS && !mode ? <CollectionPagination data={data} actions={actions} resource="materials" label="тем" /> : null}
+      {['create-lesson', 'create-homework'].includes(mode) ? <>
+        <CollectionPagination data={data} actions={actions} resource="students" label="учеников" />
+        <CollectionPagination data={data} actions={actions} resource="materials" label="тем" />
+      </> : null}
+      {screen === TEACHER_ROUTE.HOME && !mode ? <div className="dashboard-pagination">
+        {['students', 'lessons', 'homeworks'].filter((key) => data.pagination?.[key]?.total > data[key].length || data.pagination?.[key]?.error).map((resource) => <CollectionPagination key={resource} data={data} actions={actions} resource={resource} label={{ students: 'учеников', lessons: 'уроков', homeworks: 'домашних заданий' }[resource]} />)}
+      </div> : null}
     </AppShell>
   );
 }

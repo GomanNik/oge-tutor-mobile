@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, minutes } from '@nestjs/throttler';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from './prisma/prisma.module';
@@ -20,10 +21,18 @@ import { RoleGuard } from './common/role.guard';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
 import { validateEnv } from './config/env.validation';
+import { authTargetTracker, AUTH_THROTTLE_TTL_MS } from './auth/auth-throttle';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        { name: 'ip', ttl: minutes(1), limit: 30 },
+        { name: 'target', ttl: AUTH_THROTTLE_TTL_MS, limit: 8, getTracker: authTargetTracker },
+      ],
+      errorMessage: 'Слишком много попыток. Повторите позже.',
+    }),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}),
     PrismaModule,

@@ -23,6 +23,7 @@ Do not add per-package npm or pnpm lockfiles unless the workspace strategy chang
 Run the full gate from the repository root:
 
 ```powershell
+$env:VITE_API_BASE_URL = 'http://localhost:3000'
 pnpm run quality
 ```
 
@@ -55,7 +56,6 @@ Without `E2E_DATABASE_URL`, the local e2e command skips safely and CI remains th
 With Docker running:
 
 ```powershell
-cd "C:\Users\Goman Nikita\Downloads\oge-tutor-app-v2"
 docker compose up -d postgres
 cd .\oge-tutor-backend
 pnpm exec prisma migrate status
@@ -79,11 +79,12 @@ Seed is not run in CI.
 Jobs:
 
 - `backend`: install, Prisma generate, build, lint, tests.
+- `backend` also checks backup script syntax and runs the simulated failure/restore/retention suite. Run a real restore check against Docker as described in [backups.md](backups.md).
 - `frontend`: install, build, lint, typecheck, tests.
 - `prisma-db-check`: clean PostgreSQL service, migration deploy, migration status.
 - `e2e`: clean PostgreSQL service, migration deploy, AppModule HTTP e2e tests.
 - `docker-build`: backend and frontend Docker image builds.
-- `audit`: workspace dependency audit with `--audit-level moderate`. It is blocking now that the Nest 11 upgrade removed the previous known advisories.
+- `audit`: production and full workspace dependency audits at moderate severity or above. One unpatched `braces` advisory in development tooling is accepted only while no patched release exists; all other findings block CI.
 
 ## Manual VPS Deployment
 

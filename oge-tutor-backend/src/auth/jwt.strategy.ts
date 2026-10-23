@@ -20,18 +20,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string }) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      include: { teacherProfile: true, studentProfile: true },
+  async validate(payload: { sub?: unknown; sid?: unknown }) {
+    if (typeof payload?.sub !== 'string' || !payload.sub || typeof payload.sid !== 'string' || !payload.sid) throw unauthorized();
+    const session = await this.prisma.authSession.findUnique({
+      where: { id: payload.sid },
+      include: { user: { include: { teacherProfile: true, studentProfile: true } } },
     });
-    if (!user) throw unauthorized();
+    if (!session || session.userId !== payload.sub || session.revokedAt || session.expiresAt.getTime() <= Date.now()) throw unauthorized();
+    const user = session.user;
+    if (!user || session.version !== user.sessionVersion) throw unauthorized();
     if (user.role === ROLE.STUDENT && user.studentProfile?.access !== ACCESS_STATUS.ACTIVE) {
       throw unauthorized();
     }
 
     return {
       id: user.id,
+      sessionId: session.id,
       email: user.email,
       role: user.role,
       teacherId: user.role === ROLE.TEACHER ? user.teacherProfile?.id : user.studentProfile?.teacherId,

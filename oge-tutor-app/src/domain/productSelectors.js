@@ -61,6 +61,12 @@ export function sortByStartAt(items = []) {
   return [...items].sort((a, b) => asTime(a.startAt) - asTime(b.startAt));
 }
 
+export function isUpcomingLesson(lesson, now = new Date()) {
+  if (!ACTIVE_LESSONS.has(lesson.status)) return false;
+  const end = asTime(lesson.endAt) || asTime(lesson.startAt);
+  return end >= now.getTime();
+}
+
 export function sortByCreatedAtDesc(items = []) {
   return [...items].sort((a, b) => asTime(b.createdAt || b.updatedAt) - asTime(a.createdAt || a.updatedAt));
 }
@@ -72,7 +78,7 @@ export function getStudentById(data, studentId) {
 export function selectTeacherOverview(data, now = new Date()) {
   const activeLessons = sortByStartAt((data.lessons || []).filter((lesson) => ACTIVE_LESSONS.has(lesson.status)));
   const todayLessons = activeLessons.filter((lesson) => isSameDayIso(lesson.startAt, now));
-  const upcomingLessons = activeLessons.filter((lesson) => asTime(lesson.startAt) >= startOfDay(now).getTime());
+  const upcomingLessons = activeLessons.filter((lesson) => isUpcomingLesson(lesson, now));
   const nearestLesson = upcomingLessons[0] || null;
   const toReview = (data.homeworks || []).filter((item) => item.status === HOMEWORK_STATUS.SUBMITTED);
   const overdue = (data.homeworks || []).filter((item) => item.status === HOMEWORK_STATUS.OVERDUE);
@@ -103,13 +109,15 @@ function notice(id, type, title, message, extra = {}) {
     lessonId: extra.lessonId || '',
     homeworkId: extra.homeworkId || '',
     taskNumber: extra.taskNumber ?? null,
+    topicId: extra.topicId || '',
+    persisted: Boolean(extra.persisted),
     actionLabel: extra.actionLabel || 'Открыть',
   };
 }
 
-export function deriveTeacherNotifications(data, now = new Date()) {
+export function deriveTeacherNotifications(data, now = new Date(), { includeResolved = false } = {}) {
   const backend = (data.notifications || [])
-    .filter((item) => item.status !== NOTIFICATION_STATUS.RESOLVED)
+    .filter((item) => includeResolved || item.status !== NOTIFICATION_STATUS.RESOLVED)
     .map((item) => {
       const student = getStudentById(data, item.studentId);
       return notice(
@@ -117,9 +125,11 @@ export function deriveTeacherNotifications(data, now = new Date()) {
         item.type,
         item.title || 'Уведомление',
         student ? `${student.name} · ${item.message || ''}` : item.message,
-        { ...item, tone: 'amber', actionLabel: item.type === NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED ? 'Оценить' : 'Открыть' },
+        { ...item, persisted: true, tone: 'amber', actionLabel: item.type === NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED ? 'Оценить' : 'Открыть' },
       );
     });
+
+  if (data.pagination?.notifications) return sortByCreatedAtDesc(backend);
 
   const submitted = (data.homeworks || [])
     .filter((hw) => hw.status === HOMEWORK_STATUS.SUBMITTED)
@@ -173,10 +183,13 @@ export function deriveTeacherNotifications(data, now = new Date()) {
   return sortByCreatedAtDesc([...backend, ...submitted, ...overdue, ...upcoming, ...access]);
 }
 
-export function deriveStudentNotifications({ student, lessons = [], homeworks = [], materials = [], notifications = [] }, now = new Date()) {
+export function deriveStudentNotifications({ student, lessons = [], homeworks = [], materials = [], notifications = [], pagination }, now = new Date(), { includeResolved = false } = {}) {
   const incoming = (notifications || [])
-    .filter((item) => item.status !== NOTIFICATION_STATUS.RESOLVED)
-    .map((item) => notice(item.id, item.type, item.title, item.message, { ...item, tone: 'amber' }));
+    .filter((item) => (!item.studentId || item.studentId === student?.id) && item.type !== NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED)
+    .filter((item) => includeResolved || item.status !== NOTIFICATION_STATUS.RESOLVED)
+    .map((item) => notice(item.id, item.type, item.title, item.message, { ...item, persisted: true, tone: 'amber' }));
+
+  if (pagination?.notifications) return sortByCreatedAtDesc(incoming);
 
   const assigned = homeworks
     .filter((hw) => hw.status === HOMEWORK_STATUS.ASSIGNED || hw.status === HOMEWORK_STATUS.NEEDS_REVISION || hw.status === HOMEWORK_STATUS.OVERDUE)

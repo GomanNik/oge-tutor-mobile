@@ -53,6 +53,11 @@ jobs:
       - name: Test backend
         run: pnpm --dir oge-tutor-backend test
 
+      - name: Check backup scripts
+        run: |
+          bash -n scripts/backup.sh scripts/backup-common.sh scripts/verify-backup.sh scripts/check-backups.sh scripts/install-backup-timer.sh
+          bash scripts/tests/backup-tests.sh
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -223,4 +228,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit workspace dependencies
-        run: pnpm audit --audit-level moderate
+        run: pnpm run audit

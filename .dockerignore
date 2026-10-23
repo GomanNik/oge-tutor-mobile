@@ -10,6 +10,7 @@ coverage
 **/coverage
 uploads
 **/uploads
+backups
 .env
 .env.*
 !.env.example

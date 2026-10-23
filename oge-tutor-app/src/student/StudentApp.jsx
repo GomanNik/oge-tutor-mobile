@@ -15,6 +15,7 @@ import { StudentLessonDetail, StudentLessons } from './StudentLessons.jsx';
 import { StudentMaterialTopic, StudentMaterials } from './StudentMaterials.jsx';
 import { StudentProgress, WeakTaskDetail } from './StudentProgress.jsx';
 import StudentProfile from './StudentProfile.jsx';
+import { CollectionPagination } from '../shared/PaginationControls.jsx';
 
 export default function StudentApp({ data, actions, user, onLogout }) {
   const [screen, setScreen] = useState(STUDENT_ROUTE.HOME);
@@ -23,6 +24,7 @@ export default function StudentApp({ data, actions, user, onLogout }) {
   const [lessonId, setLessonId] = useState(null);
   const [weakTask, setWeakTask] = useState(null);
   const [returnWeakTask, setReturnWeakTask] = useState(null);
+  const [navigationError, setNavigationError] = useState('');
   const student = selectStudent(data, user.id);
 
   if (!student) {
@@ -31,7 +33,7 @@ export default function StudentApp({ data, actions, user, onLogout }) {
 
   const homeworks = selectStudentHomeworks(data, student.id);
   const lessons = selectStudentLessons(data, student.id);
-  const notifications = deriveStudentNotifications({ student, lessons, homeworks, materials: data.materials, notifications: data.notifications });
+  const notifications = deriveStudentNotifications({ student, lessons, homeworks, materials: data.materials, notifications: data.notifications, pagination: data.pagination });
 
   function navigate(next) {
     setScreen(next);
@@ -42,7 +44,16 @@ export default function StudentApp({ data, actions, user, onLogout }) {
     setReturnWeakTask(null);
   }
 
-  function openNotification(item) {
+  async function openNotification(item) {
+    setNavigationError('');
+    try {
+      if (item.homeworkId) await actions.loadDetail?.('homeworks', item.homeworkId);
+      else if (item.lessonId) await actions.loadDetail?.('lessons', item.lessonId);
+      else if (item.topicId) await actions.loadDetail?.('materials', item.topicId);
+    } catch (error) {
+      setNavigationError(error.message || 'Не удалось загрузить запись.');
+      return;
+    }
     if (item.homeworkId) {
       setHomeworkId(item.homeworkId);
       setScreen(STUDENT_ROUTE.HOMEWORK);
@@ -73,9 +84,10 @@ export default function StudentApp({ data, actions, user, onLogout }) {
       active={screen === STUDENT_ROUTE.NOTIFICATIONS ? STUDENT_ROUTE.HOME : screen}
       onNavigate={navigate}
       topTitle="Ученик"
-      noticeCount={notifications.length}
+      noticeCount={notifications.filter((item) => item.status === 'unread').length}
       onOpenNotifications={() => navigate(STUDENT_ROUTE.NOTIFICATIONS)}
     >
+      {navigationError ? <div className="inline-error" role="alert">{navigationError}</div> : null}
       {screen === STUDENT_ROUTE.NOTIFICATIONS && (
         <NotificationInbox
           title="Уведомления"
@@ -95,6 +107,13 @@ export default function StudentApp({ data, actions, user, onLogout }) {
       {screen === STUDENT_ROUTE.PROGRESS && !weakTask && <StudentProgress student={student} homeworks={homeworks} materials={data.materials} openWeakTask={setWeakTask} />}
       {screen === STUDENT_ROUTE.PROGRESS && weakTask && <WeakTaskDetail taskNumber={weakTask} student={student} homeworks={homeworks} materials={data.materials} onBack={() => setWeakTask(null)} openHomework={(id) => { setReturnWeakTask(weakTask); setHomeworkId(id); setWeakTask(null); setScreen(STUDENT_ROUTE.HOMEWORK); }} openMaterial={(id) => { setReturnWeakTask(weakTask); setTopicId(id); setWeakTask(null); setScreen(STUDENT_ROUTE.MATERIALS); }} />}
       {screen === STUDENT_ROUTE.PROFILE && <StudentProfile student={student} actions={actions} updateStudent={updateStudent} onLogout={onLogout} />}
+      {screen === STUDENT_ROUTE.NOTIFICATIONS ? <CollectionPagination data={data} actions={actions} resource="notifications" label="уведомлений" /> : null}
+      {screen === STUDENT_ROUTE.HOMEWORK && !homeworkId ? <CollectionPagination data={data} actions={actions} resource="homeworks" label="домашних заданий" /> : null}
+      {screen === STUDENT_ROUTE.LESSONS && !lessonId ? <CollectionPagination data={data} actions={actions} resource="lessons" label="уроков" /> : null}
+      {screen === STUDENT_ROUTE.MATERIALS && !topicId ? <CollectionPagination data={data} actions={actions} resource="materials" label="тем" /> : null}
+      {[STUDENT_ROUTE.HOME, STUDENT_ROUTE.PROGRESS].includes(screen) ? <div className="dashboard-pagination">
+        {['lessons', 'homeworks', 'materials'].filter((key) => data.pagination?.[key]?.total > data[key].length || data.pagination?.[key]?.error).map((resource) => <CollectionPagination key={resource} data={data} actions={actions} resource={resource} label={{ lessons: 'уроков', homeworks: 'домашних заданий', materials: 'тем' }[resource]} />)}
+      </div> : null}
     </AppShell>
   );
 }
