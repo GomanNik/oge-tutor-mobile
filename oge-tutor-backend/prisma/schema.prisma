@@ -18,6 +18,33 @@ enum WorkspaceRole {
   student
 }
 
+enum ExamType {
+  oge
+  ege
+}
+
+enum CatalogStatus {
+  active
+  archived
+}
+
+enum ProgramVersionStatus {
+  draft
+  published
+  archived
+}
+
+enum TaskKind {
+  short_answer
+  extended_answer
+  choice
+}
+
+enum ScoringRuleKind {
+  historical_heuristic
+  verified_reference
+}
+
 enum WorkspaceStatus {
   active
   archived
@@ -151,6 +178,10 @@ model User {
   auditEvents    WorkspaceAuditEvent[] @relation("AuditActor")
   roleGrants     WorkspaceRoleGrant[] @relation("RoleGranter")
   roleRevocations WorkspaceRoleGrant[] @relation("RoleRevoker")
+  catalogGrant CatalogGrant?
+  catalogAuditEvents CatalogAuditEvent[]
+  createdTaskMappings TaskMapping[] @relation("MappingCreator")
+  revokedTaskMappings TaskMapping[] @relation("MappingRevoker")
 
   @@index([role])
 }
@@ -215,6 +246,145 @@ model Workspace {
   invitations WorkspaceInvitation[]
   auditEvents WorkspaceAuditEvent[]
   legacyMapping LegacyWorkspaceMapping?
+  catalogSubjects Subject[]
+  catalogPrograms ExamProgram[]
+  catalogAuditEvents CatalogAuditEvent[]
+}
+
+model CatalogGrant {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  grantedAt DateTime @default(now())
+}
+
+model Subject {
+  id String @id @default(cuid())
+  scopeKey String
+  workspaceId String?
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  code String
+  name String
+  status CatalogStatus @default(active)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  programs ExamProgram[]
+
+  @@unique([scopeKey, code])
+  @@index([workspaceId, status, name, id])
+}
+
+model ExamProgram {
+  id String @id @default(cuid())
+  scopeKey String
+  workspaceId String?
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  subjectId String
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  code String
+  examType ExamType
+  variant String
+  name String
+  status CatalogStatus @default(active)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  versions ProgramVersion[]
+
+  @@unique([scopeKey, code])
+  @@unique([scopeKey, examType, subjectId, variant])
+  @@index([workspaceId, status, name, id])
+  @@index([subjectId, examType])
+}
+
+model ProgramVersion {
+  id String @id @default(cuid())
+  programId String
+  program ExamProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
+  period String
+  revisionNumber Int
+  status ProgramVersionStatus @default(draft)
+  sourceUrl String?
+  notes String @default("")
+  revision Int @default(0)
+  publishedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks TaskDefinition[]
+  scoringRule ScoringRule?
+
+  @@unique([programId, period, revisionNumber])
+  @@index([programId, status, period, id])
+}
+
+model TaskDefinition {
+  id String @id @default(cuid())
+  programVersionId String
+  programVersion ProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  code String
+  title String
+  topics String[] @default([])
+  position Int
+  kind TaskKind
+  maxScore Int?
+  criteria Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  outgoingMappings TaskMapping[] @relation("MappingSource")
+  incomingMappings TaskMapping[] @relation("MappingTarget")
+
+  @@unique([programVersionId, code])
+  @@unique([programVersionId, position])
+  @@index([programVersionId, position, id])
+}
+
+model ScoringRule {
+  id String @id @default(cuid())
+  programVersionId String @unique
+  programVersion ProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  kind ScoringRuleKind
+  code String
+  description String
+  sourceUrl String?
+  createdAt DateTime @default(now())
+}
+
+model TaskMapping {
+  id String @id @default(cuid())
+  fromTaskId String
+  fromTask TaskDefinition @relation("MappingSource", fields: [fromTaskId], references: [id], onDelete: Restrict)
+  toTaskId String
+  toTask TaskDefinition @relation("MappingTarget", fields: [toTaskId], references: [id], onDelete: Restrict)
+  reason String
+  createdById String
+  createdBy User @relation("MappingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  revision Int @default(0)
+  revokedAt DateTime?
+  revokedById String?
+  revokedBy User? @relation("MappingRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+  revocationReason String?
+
+  @@index([fromTaskId, toTaskId])
+  @@index([toTaskId])
+}
+
+model CatalogAuditEvent {
+  id String @id @default(cuid())
+  workspaceId String?
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  actorUserId String?
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  actorKind String @default("user")
+  targetType String
+  targetId String
+  action String
+  changes Json @default("{}")
+  requestId String
+  occurredAt DateTime @default(now())
+
+  @@index([workspaceId, occurredAt, id])
+  @@index([targetType, targetId, occurredAt])
 }
 
 model WorkspaceMembership {

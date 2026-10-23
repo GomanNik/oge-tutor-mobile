@@ -20,6 +20,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RoleGuard } from './common/role.guard';
 import { LegacyAccessGuard } from './workspace/legacy.guard';
 import { WorkspaceModule } from './workspace/workspace.module';
+import { ProgramCatalogModule } from './program-catalog/program-catalog.module';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
 import { validateEnv } from './config/env.validation';
@@ -49,6 +50,7 @@ import { authTargetTracker, AUTH_THROTTLE_TTL_MS } from './auth/auth-throttle';
     ProgressModule,
     HealthModule,
     WorkspaceModule,
+    ProgramCatalogModule,
   ],
   providers: [
     JwtStrategy,

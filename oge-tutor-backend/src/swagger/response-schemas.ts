@@ -1,6 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
-import { DeliveryStatus, InvitationStatus, MembershipStatus, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
+import { CatalogStatus, DeliveryStatus, ExamType, InvitationStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -126,13 +126,19 @@ const v2Mutation = (item: Schema) => strictObject({ item, changed: array(string)
 
 Object.assign(responseSchemas, {
   V2Session: strictObject({ token: string, userId: string, expiresAt: date }),
-  V2User: strictObject({ id: string, email: { ...string, format: 'email' }, displayName: string, revision: integer }),
+  V2User: strictObject({ id: string, email: { ...string, format: 'email' }, displayName: string, revision: integer, catalogManage: boolean }),
   V2Context: strictObject({ workspaceId: string, name: string, status: enumeration(WorkspaceStatus), legacyRole: { type: 'string', enum: ['teacher', 'student'], nullable: true }, roles: v2Roles }),
   V2Member: strictObject({ id: string, userId: string, email: { ...string, format: 'email' }, displayName: string, roles: v2Roles, status: enumeration(MembershipStatus), revision: integer }),
   V2Invitation: strictObject({ id: string, email: { ...string, format: 'email' }, roles: v2Roles, expiresAt: date, status: enumeration(InvitationStatus), deliveryStatus: enumeration(DeliveryStatus), revision: integer }),
   V2Workspace: strictObject({ id: string, name: string, timezone: string, status: enumeration(WorkspaceStatus), revision: integer }),
   V2AuditChanges: strictObject({
-    role: v2Role, roles: v2Roles, status: enumeration(MembershipStatus), displayNameOverride: { ...string, nullable: true },
+    role: v2Role, roles: v2Roles,
+    status: { type: 'string', enum: [...Object.values(MembershipStatus), ...Object.values(CatalogStatus), ...Object.values(ProgramVersionStatus)] },
+    displayNameOverride: { ...string, nullable: true },
+    code: string, name: string, subjectId: string, examType: enumeration(ExamType), variant: string,
+    period: string, revisionNumber: integer, taskCount: integer, versionId: string,
+    sourceUrl: { ...string, nullable: true }, notes: string, kind: enumeration(ScoringRuleKind),
+    fromTaskId: string, toTaskId: string, reason: string,
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
   V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
@@ -146,4 +152,31 @@ Object.assign(responseSchemas, {
   V2InvitationPage: v2Page(ref('V2Invitation')),
   V2InvitationMutation: v2Mutation(ref('V2Invitation')),
   V2AuditPage: v2Page(ref('V2AuditEvent')),
+});
+
+const catalogMutation = (item: Schema) => strictObject({ item, changed: array(string), requestId: string });
+const catalogTaskMutation = (item: Schema) => strictObject({ item, versionRevision: integer, changed: array(string), requestId: string });
+Object.assign(responseSchemas, {
+  V2Subject: strictObject({ id: string, scopeKey: string, workspaceId: { ...string, nullable: true }, code: string, name: string, status: enumeration(CatalogStatus), revision: integer, ...timestamps }),
+  V2Program: strictObject({ id: string, scopeKey: string, workspaceId: { ...string, nullable: true }, subjectId: string, code: string, examType: enumeration(ExamType), variant: string, name: string, status: enumeration(CatalogStatus), revision: integer, ...timestamps, subject: strictObject({ code: string, name: string }) }, ['id', 'scopeKey', 'workspaceId', 'subjectId', 'code', 'examType', 'variant', 'name', 'status', 'revision', 'createdAt', 'updatedAt']),
+  V2ScoringRule: strictObject({ id: string, programVersionId: string, kind: enumeration(ScoringRuleKind), code: string, description: string, sourceUrl: { ...string, nullable: true }, createdAt: date }),
+  V2ProgramVersion: strictObject({ id: string, programId: string, period: string, revisionNumber: integer, status: enumeration(ProgramVersionStatus), sourceUrl: { ...string, nullable: true }, notes: string, revision: integer, publishedAt: { ...date, nullable: true }, ...timestamps, scoringRule: nullableRef('V2ScoringRule') }, ['id', 'programId', 'period', 'revisionNumber', 'status', 'sourceUrl', 'notes', 'revision', 'publishedAt', 'createdAt', 'updatedAt']),
+  V2TaskCriterion: strictObject({ code: string, title: string, maxScore: integer }),
+  V2TaskDefinition: strictObject({ id: string, programVersionId: string, code: string, title: string, topics: array(string), position: integer, kind: enumeration(TaskKind), maxScore: { ...integer, nullable: true }, criteria: array(ref('V2TaskCriterion')), ...timestamps }),
+  V2TaskMapping: strictObject({ id: string, fromTaskId: string, toTaskId: string, reason: string, createdById: string, createdAt: date, revision: integer, revokedAt: { ...date, nullable: true }, revokedById: { ...string, nullable: true }, revocationReason: { ...string, nullable: true }, fromTask: strictObject({ code: string, title: string }), toTask: strictObject({ code: string, title: string }) }, ['id', 'fromTaskId', 'toTaskId', 'reason', 'createdById', 'createdAt', 'revision', 'revokedAt', 'revokedById', 'revocationReason']),
+  V2SubjectPage: pageSchema(ref('V2Subject')),
+  V2SubjectDetail: detailSchema(ref('V2Subject')),
+  V2SubjectMutation: catalogMutation(ref('V2Subject')),
+  V2ProgramPage: pageSchema(ref('V2Program')),
+  V2ProgramDetail: detailSchema(ref('V2Program')),
+  V2ProgramMutation: catalogMutation(ref('V2Program')),
+  V2ProgramVersionPage: pageSchema(ref('V2ProgramVersion')),
+  V2ProgramVersionDetail: detailSchema(ref('V2ProgramVersion')),
+  V2ProgramVersionMutation: catalogMutation(ref('V2ProgramVersion')),
+  V2TaskDefinitionPage: pageSchema(ref('V2TaskDefinition')),
+  V2TaskDefinitionMutation: catalogTaskMutation(ref('V2TaskDefinition')),
+  V2TaskDeletion: catalogTaskMutation(strictObject({ id: string })),
+  V2ScoringRuleMutation: catalogTaskMutation(ref('V2ScoringRule')),
+  V2TaskMappingPage: pageSchema(ref('V2TaskMapping')),
+  V2TaskMappingMutation: catalogMutation(ref('V2TaskMapping')),
 });

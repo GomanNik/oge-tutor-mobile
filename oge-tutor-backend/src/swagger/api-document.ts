@@ -12,13 +12,14 @@ import * as Progress from '../progress/progress.dto';
 import * as Students from '../students/students.dto';
 import * as Teacher from '../teacher/teacher.dto';
 import * as Workspace from '../workspace/workspace.dto';
+import * as ProgramCatalog from '../program-catalog/program-catalog.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog),
 ];
 const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
@@ -90,6 +91,32 @@ const workspaceContracts: OperationContracts = {
   'post /api/v2/invitations/accept-existing': { request: 'AcceptExistingInvitationDto', response: 'V2MemberDetail' },
 };
 Object.assign(contracts, workspaceContracts);
+Object.assign(contracts, {
+  'get /api/v2/subjects': { response: 'V2SubjectPage' },
+  'get /api/v2/subjects/{}': { response: 'V2SubjectDetail' },
+  'post /api/v2/subjects': { request: 'CreateSubjectDto', response: 'V2SubjectMutation' },
+  'patch /api/v2/subjects/{}': { request: 'UpdateSubjectDto', response: 'V2SubjectMutation' },
+  'post /api/v2/subjects/{}/archive': { response: 'V2SubjectMutation' },
+  'get /api/v2/programs': { response: 'V2ProgramPage' },
+  'get /api/v2/programs/{}': { response: 'V2ProgramDetail' },
+  'post /api/v2/programs': { request: 'CreateProgramDto', response: 'V2ProgramMutation' },
+  'patch /api/v2/programs/{}': { request: 'UpdateProgramDto', response: 'V2ProgramMutation' },
+  'post /api/v2/programs/{}/archive': { response: 'V2ProgramMutation' },
+  'get /api/v2/programs/{}/versions': { response: 'V2ProgramVersionPage' },
+  'post /api/v2/programs/{}/versions': { request: 'CreateProgramVersionDto', response: 'V2ProgramVersionMutation' },
+  'get /api/v2/program-versions/{}': { response: 'V2ProgramVersionDetail' },
+  'patch /api/v2/program-versions/{}': { request: 'UpdateProgramVersionDto', response: 'V2ProgramVersionMutation' },
+  'post /api/v2/program-versions/{}/publish': { response: 'V2ProgramVersionMutation' },
+  'post /api/v2/program-versions/{}/archive': { response: 'V2ProgramVersionMutation' },
+  'get /api/v2/program-versions/{}/tasks': { response: 'V2TaskDefinitionPage' },
+  'post /api/v2/program-versions/{}/tasks': { request: 'TaskInputDto', response: 'V2TaskDefinitionMutation' },
+  'patch /api/v2/program-versions/{}/tasks/{}': { request: 'TaskInputDto', response: 'V2TaskDefinitionMutation' },
+  'delete /api/v2/program-versions/{}/tasks/{}': { response: 'V2TaskDeletion' },
+  'post /api/v2/program-versions/{}/scoring-rule': { request: 'ScoringRuleDto', response: 'V2ScoringRuleMutation' },
+  'get /api/v2/task-mappings': { response: 'V2TaskMappingPage' },
+  'post /api/v2/task-mappings': { request: 'CreateTaskMappingDto', response: 'V2TaskMappingMutation' },
+  'post /api/v2/task-mappings/{}/revoke': { request: 'RevokeTaskMappingDto', response: 'V2TaskMappingMutation' },
+} satisfies OperationContracts);
 for (const [key, request] of Object.entries(mutationRequests)) {
   contracts[key] = { request, response: key.endsWith('/security/password') ? 'OkResponse' : 'MutationResponse', multipart: key.endsWith('/submissions') };
 }
@@ -134,8 +161,10 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
         operation.parameters.push({ name: 'x-request-id', in: 'header', required: false, schema: { type: 'string' }, description: 'Optional correlation identifier, echoed in error responses.' });
       }
       if (path.startsWith('/api/v2/') && method !== 'get') {
-        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend)$/.test(path);
-        const isIdempotentMutation = /\/invitations$|\/roles$/.test(path);
+        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend|archive|publish)$/.test(path)
+          || /\/program-versions\/[^/]+\/tasks(?:\/[^/]+)?$/.test(path) || /\/program-versions\/[^/]+\/scoring-rule$/.test(path);
+        const isIdempotentMutation = /\/invitations$|\/roles$/.test(path) || /\/api\/v2\/(subjects|programs|task-mappings)$/.test(path)
+          || /\/api\/v2\/programs\/[^/]+\/versions$/.test(path);
         if (isRevisionMutation) operation.parameters.push({ name: 'If-Match', in: 'header', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Expected resource revision.' });
         if (isIdempotentMutation) operation.parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
       }
@@ -173,7 +202,7 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
       if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
-      if (path.startsWith('/api/v2/') && (method === 'patch' || /\/(revoke|suspend|resume|resend)$/.test(path))) {
+      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|tasks|scoring-rule)$/.test(path))) {
         errors['412'] = 'Revision mismatch.';
         errors['428'] = 'If-Match header is required.';
       }
