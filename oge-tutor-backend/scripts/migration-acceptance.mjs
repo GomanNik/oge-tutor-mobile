@@ -113,18 +113,30 @@ try {
   assert.deepEqual(await rows(`SELECT "workspaceId",status FROM "WorkspaceMembership" WHERE "userId"='legacy-su2'`),
     [{ workspaceId: 'legacy-legacy-t2', status: 'suspended' }]);
   assert.equal(await count('TaskDefinition'), 25);
+  assert.equal(await count('Course'), 2);
+  assert.equal(await count('CourseTeacher'), 2);
+  assert.equal(await count('Enrollment'), 2);
+  assert.equal(await count('LegacyCourseMapping'), 2);
+  assert.deepEqual(await rows(`SELECT c.id,c.status,e.status AS "enrollmentStatus" FROM "Course" c JOIN "Enrollment" e ON e."courseId"=c.id WHERE c.id='legacy-course-legacy-s1'`),
+    [{ id: 'legacy-course-legacy-s1', status: 'active', enrollmentStatus: 'active' }]);
   assert.deepEqual(await rows(`SELECT id,status FROM "ProgramVersion" WHERE id='legacy-version-oge-math'`),
     [{ id: 'legacy-version-oge-math', status: 'published' }]);
 
   const firstBackfill = JSON.parse(backfill().trim().split('\n').at(-1));
   assert.equal(firstBackfill.memberships, 0);
   assert.equal(firstBackfill.grants, 0);
+  await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "WorkspaceMembership" WHERE id='legacy-student-legacy-s1'`));
+  await db.$executeRawUnsafe(`DELETE FROM "LegacyCourseMapping" WHERE "studentProfileId"='legacy-s1'`);
+  await db.$executeRawUnsafe(`DELETE FROM "Enrollment" WHERE id='legacy-enrollment-legacy-s1'`);
+  await db.$executeRawUnsafe(`DELETE FROM "CourseTeacher" WHERE id='legacy-course-teacher-legacy-s1'`);
+  await db.$executeRawUnsafe(`DELETE FROM "Course" WHERE id='legacy-course-legacy-s1'`);
   await db.$executeRawUnsafe(`DELETE FROM "WorkspaceRoleGrant" WHERE "membershipId"='legacy-student-legacy-s1'`);
   await db.$executeRawUnsafe(`DELETE FROM "WorkspaceMembership" WHERE id='legacy-student-legacy-s1'`);
   const recovered = JSON.parse(backfill().trim().split('\n').at(-1));
   assert.equal(recovered.memberships, 1);
   assert.equal(recovered.grants, 1);
   assert.equal(await count('WorkspaceMembership'), 4);
+  assert.equal(await count('LegacyCourseMapping'), 2);
 
   await db.$executeRawUnsafe(`INSERT INTO "User" (id,email,"passwordHash",role,"displayName","updatedAt") VALUES ('orphan-user','orphan@test.local','hash','teacher','Orphan',NOW())`);
   const membershipCount = await count('WorkspaceMembership');

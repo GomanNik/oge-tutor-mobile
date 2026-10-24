@@ -236,6 +236,8 @@ jobs:
       FRONTEND_ORIGIN: http://127.0.0.1:5199
       REAL_API_EMAIL: browser-admin@test.local
       REAL_API_PASSWORD: BrowserSmoke-CI-2026!
+      COURSE_REAL_API_EMAIL: teacher@mail.ru
+      COURSE_REAL_API_PASSWORD: BrowserCourse-CI-2026!
       WORKSPACE_ADMIN_EMAIL: browser-admin@test.local
       WORKSPACE_ADMIN_PASSWORD: BrowserSmoke-CI-2026!
       WORKSPACE_ADMIN_NAME: Browser Admin
@@ -267,6 +269,7 @@ jobs:
         run: |
           pnpm --dir oge-tutor-backend exec prisma migrate deploy
           pnpm --dir oge-tutor-backend run workspace:operator bootstrap
+          pnpm --dir oge-tutor-backend exec ts-node --project tsconfig.json prisma/browser-course-seed.ts
 
       - name: Build backend
         run: pnpm --dir oge-tutor-backend run build

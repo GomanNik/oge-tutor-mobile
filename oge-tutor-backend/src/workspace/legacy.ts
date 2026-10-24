@@ -46,6 +46,44 @@ export async function ensureLegacyStudent(db: Db, studentId: string) {
     create: { membershipId: member.id, role: 'student' },
     update: {},
   });
+  const courseId = `legacy-course-${student.id}`;
+  const enrollmentId = `legacy-enrollment-${student.id}`;
+  const teacher = await db.teacherProfile.findUniqueOrThrow({ where: { id: student.teacherId } });
+  const lead = await db.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId, userId: teacher.userId } } });
+  const workspace = await db.workspace.findUniqueOrThrow({ where: { id: workspaceId } });
+  await db.course.upsert({
+    where: { id: courseId },
+    create: {
+      id: courseId, workspaceId, programVersionId: 'legacy-version-oge-math',
+      title: `ОГЭ математика · ${student.name}`, defaultFormat: 'individual', capacity: 1,
+      startsOn: student.createdAt, timezone: workspace.timezone,
+      status: student.access === 'active' ? 'active' : 'draft',
+    },
+    update: {},
+  });
+  await db.courseTeacher.upsert({
+    where: { id: `legacy-course-teacher-${student.id}` },
+    create: {
+      id: `legacy-course-teacher-${student.id}`, workspaceId, courseId,
+      membershipId: lead.id, role: 'lead', startsOn: student.createdAt,
+    },
+    update: {},
+  });
+  await db.enrollment.upsert({
+    where: { id: enrollmentId },
+    create: {
+      id: enrollmentId, workspaceId, courseId, membershipId: member.id,
+      status: student.access === 'active' ? 'active' : 'invited',
+      startsOn: student.access === 'active' ? student.createdAt : null,
+      goal: student.goal, note: student.note,
+    },
+    update: {},
+  });
+  await db.legacyCourseMapping.upsert({
+    where: { studentProfileId: student.id },
+    create: { studentProfileId: student.id, courseId, enrollmentId },
+    update: {},
+  });
   return member;
 }
 
@@ -60,4 +98,17 @@ export async function syncLegacyStudentAccess(db: Db, studentId: string, access:
       revision: { increment: 1 },
     },
   });
+  const mappingCourse = await db.legacyCourseMapping.findUnique({ where: { studentProfileId: studentId } });
+  if (mappingCourse) {
+    const enrollment = await db.enrollment.findUniqueOrThrow({ where: { id: mappingCourse.enrollmentId } });
+    await db.enrollment.update({
+      where: { id: mappingCourse.enrollmentId },
+      data: { status: access === 'active' ? 'active' : access === 'disabled' ? 'paused' : 'invited',
+        ...(access === 'active' && !enrollment.startsOn ? { startsOn: new Date() } : {}), revision: { increment: 1 } },
+    });
+    await db.course.update({
+      where: { id: mappingCourse.courseId },
+      data: { status: access === 'active' ? 'active' : 'draft', revision: { increment: 1 } },
+    });
+  }
 }

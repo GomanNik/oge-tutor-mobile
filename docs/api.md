@@ -1,6 +1,6 @@
 # HTTP API
 
-This page describes the **currently implemented API**. Workspace identity, administration, and the versioned exam catalog are implemented under `/api/v2`; courses and groups in [platform/api-target.md](platform/api-target.md) remain future design.
+This page describes the **currently implemented API**. Workspace identity, administration, the exam catalog, and course/roster management are implemented under `/api/v2`. Group lessons and assignments in [platform/api-target.md](platform/api-target.md) remain future design.
 
 The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. The legacy routes below have no `/api` prefix; new workspace routes use `/api/v2`. Protected calls use `Authorization: Bearer <JWT>`; health, login, password-reset, access-token verification/completion and v2 invitation acceptance for a new account are public. Rate limits apply to public authentication routes.
 
@@ -10,7 +10,7 @@ The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` w
 
 `GET /api/v2/workspaces/:workspaceId` reads the selected active workspace. Its `members`, `invitations` and `audit-events` routes provide scoped cursor pages; only an active workspace administrator can use the management routes. `POST /api/v2/invitations/accept-new` creates an account from a valid email invitation, while `accept-existing` adds a matching logged-in account. There is no public workspace creation or self-registration. See [the block 1 contract and operations](platform/block-1-operations.md) and the exact DTOs/errors in Swagger.
 
-Every workspace request requires `X-Active-Role`; the server rechecks membership and grant on each request. State transitions require `If-Match` revision (428 missing, 412 stale), while new invitations and grants require `Idempotency-Key`. Mutations return `{item,changed,requestId}`, not a full cabinet. A new `student`/`teacher` role does not create legacy educational records; courses and groups are not yet implemented.
+Every workspace request requires `X-Active-Role`; the server rechecks membership and grant on each request. State transitions require `If-Match` revision (428 missing, 412 stale), while new invitations and grants require `Idempotency-Key`. Mutations return `{item,changed,requestId}`, not a full cabinet. A new `student`/`teacher` role does not create legacy educational records; course membership is assigned explicitly.
 
 ## Exam catalog v2 (Block 2)
 
@@ -26,6 +26,12 @@ The catalog routes require a Bearer session. Global subjects and published/archi
 | `GET/POST /task-mappings`, `POST /task-mappings/:id/revoke` | Explicit task equivalence between versions of one program, with auditable revocation. |
 
 Catalog lists return `{items,total,page,pageSize}` with bounded pagination. Creates require `Idempotency-Key`; state changes require `If-Match` (the version's revision for task/rule writes). Missing/stale revision yields 428/412; invalid transitions yield 409. Mutations return `{item,changed,requestId}`, task/rule mutations also return `versionRevision`. Full DTOs, filters and error schemas appear in Swagger. See [Block 2 operations and acceptance](platform/block-2-catalog.md).
+
+## Courses and roster v2 (Block 3)
+
+`GET/POST /api/v2/workspaces/:workspaceId/courses`, `GET/PATCH /courses/:id` and `POST /courses/:id/{activate,pause,complete,archive}` manage one course per published program version. `GET/POST /courses/:id/teachers`, `PATCH /courses/:id/teachers/:linkId`, `GET/POST /courses/:id/enrollments` and `GET/PATCH /courses/:id/enrollments/:enrollmentId` manage named teachers and individual participation. `POST /api/v2/workspaces/:workspaceId/enrollment-batches/preview` checks 1–50 students without writing, and `POST /enrollment-batches` applies all or none. These paths all use Bearer and `X-Active-Role`.
+
+Administrators manage the roster; assigned teachers read their own course; students read only their own active/paused/completed participation and never a classmate's row. New and batch creates require `Idempotency-Key`; PATCH and course state transitions require `If-Match`. List pages are `{items,total,page,pageSize}`. Legacy pairs appear as read-only individual courses while lessons, homework and progress remain on v1. See the [block 3 contract and migration notes](platform/block-3-courses.md).
 
 ## Response Contract
 
