@@ -16,7 +16,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY oge-tutor-app/package.json ./oge-tutor-app/package.json
 COPY oge-tutor-backend/package.json ./oge-tutor-backend/package.json
 RUN --mount=type=cache,id=oge-tutor-frontend-pnpm-store,target=/pnpm/store \
-  pnpm install --frozen-lockfile --filter oge-tutor-app...
+  pnpm install --frozen-lockfile --prod --filter oge-tutor-app...
 
 COPY oge-tutor-app ./oge-tutor-app
 ARG VITE_API_BASE_URL=http://localhost:3000

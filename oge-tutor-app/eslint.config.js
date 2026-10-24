@@ -13,7 +13,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['src/**/*.{js,jsx}', 'scripts/**/*.mjs', 'tests/**/*.test.js'],
+    files: ['src/**/*.{js,jsx}', 'scripts/**/*.mjs', 'tests/**/*.test.js', 'tests/browser/**/*.spec.js', 'playwright.config.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

@@ -92,6 +92,19 @@ jobs:
       - name: Test frontend
         run: pnpm --dir oge-tutor-app test
 
+      - name: Install browser for viewport tests
+        run: pnpm --dir oge-tutor-app exec playwright install --with-deps chromium
+
+      - name: Test frontend viewport and keyboard
+        run: pnpm --dir oge-tutor-app run test:browser
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-browser-results
+          path: oge-tutor-app/test-results/
+
   prisma-db-check:
     name: Prisma Migration Check
     runs-on: ubuntu-latest
@@ -138,6 +151,12 @@ jobs:
 
       - name: Check migration status
         run: pnpm --dir oge-tutor-backend exec prisma migrate status
+
+      - name: Check schema drift
+        run: pnpm --dir oge-tutor-backend exec prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+
+      - name: Verify legacy migration and database constraints
+        run: pnpm --dir oge-tutor-backend run test:migrations
 
   e2e:
     name: AppModule E2E
@@ -191,6 +210,79 @@ jobs:
 
       - name: Run AppModule e2e tests
         run: pnpm --dir oge-tutor-backend run test:e2e
+
+  browser-real-api:
+    name: Browser Real API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oge_tutor_browser_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d oge_tutor_browser_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/oge_tutor_browser_ci?schema=public
+      VITE_API_BASE_URL: http://127.0.0.1:3000
+      PUBLIC_BACKEND_URL: http://127.0.0.1:3000
+      APP_FRONTEND_URL: http://127.0.0.1:5199
+      FRONTEND_ORIGIN: http://127.0.0.1:5199
+      REAL_API_EMAIL: browser-admin@test.local
+      REAL_API_PASSWORD: BrowserSmoke-CI-2026!
+      WORKSPACE_ADMIN_EMAIL: browser-admin@test.local
+      WORKSPACE_ADMIN_PASSWORD: BrowserSmoke-CI-2026!
+      WORKSPACE_ADMIN_NAME: Browser Admin
+      WORKSPACE_NAME: Browser Workspace
+      MAILER_PROVIDER: noop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --dir oge-tutor-backend run prisma:generate
+
+      - name: Apply migrations and bootstrap
+        run: |
+          pnpm --dir oge-tutor-backend exec prisma migrate deploy
+          pnpm --dir oge-tutor-backend run workspace:operator -- bootstrap
+
+      - name: Build backend
+        run: pnpm --dir oge-tutor-backend run build
+
+      - name: Install browser
+        run: pnpm --dir oge-tutor-app exec playwright install --with-deps chromium
+
+      - name: Test browser against real API
+        run: |
+          pnpm --dir oge-tutor-backend start &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/health >/dev/null
+          pnpm --dir oge-tutor-app run test:browser -- --grep 'real API'
 
   docker-build:
     name: Docker Build

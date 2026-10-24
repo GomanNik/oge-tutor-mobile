@@ -11,6 +11,7 @@ import { AppError, forbidden, notFound } from '../common/app-error';
 import { validateEmail, validatePassword } from '../common/validation';
 import { WorkspaceContext, WorkspaceContextService } from './workspace-context.service';
 import { CreateInvitationDto, InvitationQueryDto } from './workspace.dto';
+import { recordOutboxDeliveryFailure } from '../observability/metrics';
 
 type InviteRow = Prisma.WorkspaceInvitationGetPayload<{ include: { roles: true; workspace: true } }>;
 
@@ -19,6 +20,9 @@ function tokenHash(token: string) { return createHash('sha256').update(token).di
 function bodyHash(body: unknown) { return createHash('sha256').update(JSON.stringify(body)).digest('hex'); }
 function invitationDto(row: InviteRow) {
   return { id: row.id, email: row.email, roles: row.roles.map(role => role.role), expiresAt: row.expiresAt.toISOString(), status: row.status, deliveryStatus: row.deliveryStatus, revision: row.revision };
+}
+function isAcceptanceConflict(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034');
 }
 
 @Injectable()
@@ -205,36 +209,50 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
         return user.id;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') fail('account_exists', 'Войдите в существующий аккаунт.');
+      if (isAcceptanceConflict(error)) {
+        const current = await this.prisma.workspaceInvitation.findUnique({ where: { tokenHash: tokenHash(token) } });
+        if (current?.status === 'accepted') fail('invitation_used', 'Приглашение уже использовано.');
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') fail('account_exists', 'Войдите в существующий аккаунт.');
+        fail('invitation_conflict', 'Приглашение меняется. Повторите запрос.');
+      }
       throw error;
     }
     const session = await this.auth.signAccountSession(userId);
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const contexts = await this.context.listMyContexts(userId);
-    return { session, user: { id: user.id, email: user.email, displayName: user.displayName, revision: user.revision }, contexts };
+    return { session, user: { id: user.id, email: user.email, displayName: user.displayName, revision: user.revision, catalogManage: false }, contexts };
   }
 
   async acceptExisting(userId: string, token: string, requestId: string) {
-    return this.prisma.$transaction(async tx => {
-      const invite = await this.usableInvite(tx, token);
-      const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
-      if (user.email !== invite.email) throw forbidden('Приглашение предназначено другому аккаунту.');
-      const existing = await tx.workspaceMembership.findUnique({ where: { workspaceId_userId: { workspaceId: invite.workspaceId, userId } } });
-      if (existing?.status === 'suspended') fail('membership_suspended', 'Обратитесь к администратору для восстановления доступа.');
-      const claimed = await tx.workspaceInvitation.updateMany({ where: { id: invite.id, status: 'pending', tokenHash: invite.tokenHash, expiresAt: { gt: new Date() } }, data: { status: 'accepted', acceptedAt: new Date(), revision: { increment: 1 } } });
-      if (claimed.count !== 1) fail('invitation_used', 'Приглашение уже использовано.');
-      const member = existing || await tx.workspaceMembership.create({ data: { workspaceId: invite.workspaceId, userId } });
-      for (const role of invite.roles) {
-        await tx.workspaceRoleGrant.upsert({
-          where: { membershipId_role: { membershipId: member.id, role: role.role } },
-          create: { membershipId: member.id, role: role.role, grantedById: invite.inviterUserId },
-          update: { revokedAt: null, revokedById: null, grantedAt: new Date(), grantedById: invite.inviterUserId },
-        });
+    try {
+      return await this.prisma.$transaction(async tx => {
+        const invite = await this.usableInvite(tx, token);
+        const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+        if (user.email !== invite.email) throw forbidden('Приглашение предназначено другому аккаунту.');
+        const existing = await tx.workspaceMembership.findUnique({ where: { workspaceId_userId: { workspaceId: invite.workspaceId, userId } } });
+        if (existing?.status === 'suspended') fail('membership_suspended', 'Обратитесь к администратору для восстановления доступа.');
+        const claimed = await tx.workspaceInvitation.updateMany({ where: { id: invite.id, status: 'pending', tokenHash: invite.tokenHash, expiresAt: { gt: new Date() } }, data: { status: 'accepted', acceptedAt: new Date(), revision: { increment: 1 } } });
+        if (claimed.count !== 1) fail('invitation_used', 'Приглашение уже использовано.');
+        const member = existing || await tx.workspaceMembership.create({ data: { workspaceId: invite.workspaceId, userId } });
+        for (const role of invite.roles) {
+          await tx.workspaceRoleGrant.upsert({
+            where: { membershipId_role: { membershipId: member.id, role: role.role } },
+            create: { membershipId: member.id, role: role.role, grantedById: invite.inviterUserId },
+            update: { revokedAt: null, revokedById: null, grantedAt: new Date(), grantedById: invite.inviterUserId },
+          });
+        }
+        const updated = await tx.workspaceMembership.update({ where: { id: member.id }, data: { revision: { increment: 1 } }, include: { roles: true } });
+        await tx.workspaceAuditEvent.create({ data: { workspaceId: invite.workspaceId, actorUserId: userId, targetType: 'membership', targetId: member.id, action: 'invitation.accepted', changes: { roles: invite.roles.map(item => item.role) }, requestId } });
+        return { item: { id: updated.id, userId, email: user.email, displayName: updated.displayNameOverride || user.displayName, roles: updated.roles.filter(role => !role.revokedAt).map(role => role.role), status: updated.status, revision: updated.revision } };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isAcceptanceConflict(error)) {
+        const current = await this.prisma.workspaceInvitation.findUnique({ where: { tokenHash: tokenHash(token) } });
+        if (current?.status === 'accepted') fail('invitation_used', 'Приглашение уже использовано.');
+        fail('invitation_conflict', 'Приглашение меняется. Повторите запрос.');
       }
-      const updated = await tx.workspaceMembership.update({ where: { id: member.id }, data: { revision: { increment: 1 } }, include: { roles: true } });
-      await tx.workspaceAuditEvent.create({ data: { workspaceId: invite.workspaceId, actorUserId: userId, targetType: 'membership', targetId: member.id, action: 'invitation.accepted', changes: { roles: invite.roles.map(item => item.role) }, requestId } });
-      return { item: { id: updated.id, userId, email: user.email, displayName: updated.displayNameOverride || user.displayName, roles: updated.roles.filter(role => !role.revokedAt).map(role => role.role), status: updated.status, revision: updated.revision } };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      throw error;
+    }
   }
 
   async deliverOne(id: string, immediate = false) {
@@ -257,6 +275,7 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
         this.prisma.workspaceInvitation.update({ where: { id: invite.id }, data: { deliveryStatus: 'sent' } }),
       ]);
     } catch {
+      recordOutboxDeliveryFailure();
       await this.prisma.$transaction([
         this.prisma.workspaceEmailOutbox.update({ where: { id }, data: { leaseUntil: null, nextAttemptAt: new Date(Date.now() + Math.min(3600000, 30000 * 2 ** Math.min(outbox.attempts, 7))), lastErrorCode: 'delivery_failed' } }),
         this.prisma.workspaceInvitation.update({ where: { id: invite.id }, data: { deliveryStatus: 'failed' } }),

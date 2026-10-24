@@ -11,6 +11,7 @@ NODE_ENV=production
 DATABASE_URL=postgresql://...
 JWT_SECRET=long-random-secret
 WORKSPACE_INVITE_KEY=independent-random-secret-at-least-32-characters
+METRICS_TOKEN=independent-random-secret-at-least-32-characters
 PUBLIC_BACKEND_URL=https://api.example.com
 APP_FRONTEND_URL=https://app.example.com
 FRONTEND_ORIGIN=https://app.example.com
@@ -37,8 +38,9 @@ BOOTSTRAP_TEACHER_NAME=Teacher Name
 
 `BOOTSTRAP_TEACHER_*` values are read only by the one-time `pnpm --dir oge-tutor-backend run bootstrap:teacher` command. They are not required for normal backend startup and should not be kept in long-lived `.env` files after the first teacher is created.
 
-Production validation rejects missing `DATABASE_URL`, weak/default `JWT_SECRET`, missing public URLs and incomplete SMTP configuration.
+Production validation rejects missing `DATABASE_URL`, weak/default `JWT_SECRET`, missing public URLs, missing metrics token and incomplete SMTP configuration.
 `WORKSPACE_INVITE_KEY` encrypts pending invitation links in the database outbox. Keep it distinct from `JWT_SECRET`, at least 32 characters long, and retain it while undelivered invitations exist. In development an unset key falls back to `JWT_SECRET`.
+`METRICS_TOKEN` protects `GET /internal/metrics`. Configure a Prometheus-compatible scraper to send `Authorization: Bearer <METRICS_TOKEN>` over the private network; do not expose the token or endpoint publicly. The endpoint reports aggregate login/access denials, invitation delivery failures, and current outbox backlog without email addresses or invitation tokens. Counters are process-local and reset on restart; scrape each replica separately.
 
 Development and tests may use:
 
@@ -87,6 +89,7 @@ DEPLOY_PATH
 DATABASE_URL
 JWT_SECRET
 WORKSPACE_INVITE_KEY
+METRICS_TOKEN
 PUBLIC_BACKEND_URL
 APP_FRONTEND_URL
 FRONTEND_ORIGIN
