@@ -18,7 +18,8 @@
   },
   "pnpm": {
     "overrides": {
-      "multer": "2.4.0",
+      "multer": "2.5.0",
+      "body-parser": "2.4.0",
       "express>path-to-regexp": "0.1.13",
       "qs": "6.16.0",
       "@nestjs/cli>glob": "10.5.0",
@@ -33,7 +34,8 @@
       "tmp": "0.2.7",
       "brace-expansion@^1.0.0": "1.1.21",
       "brace-expansion@^2.0.0": "2.1.7",
-      "fast-uri": "3.1.8",
+      "fast-uri": "3.1.9",
+      "zod": "4.6.6",
       "postcss": "8.5.23",
       "nanoid": "3.3.18",
       "deepmerge-ts": "8.0.0",
