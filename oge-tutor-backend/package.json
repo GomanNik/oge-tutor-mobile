@@ -16,7 +16,8 @@
     "prisma:seed": "ts-node --project tsconfig.json prisma/seed.ts",
     "demo:seed": "ts-node --project tsconfig.json prisma/demo-seed.ts",
     "bootstrap:teacher": "ts-node --project tsconfig.json src/cli/bootstrap-teacher.ts",
-    "workspace:operator": "ts-node --project tsconfig.json src/cli/workspace-operator.ts"
+    "workspace:operator": "ts-node --project tsconfig.json src/cli/workspace-operator.ts",
+    "catalog:operator": "ts-node --project tsconfig.json src/cli/catalog-operator.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.1.27",
@@ -33,7 +34,7 @@
     "class-validator": "0.14.2",
     "express": "^5.2.1",
     "file-type": "21.3.4",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "nodemailer": "10.2.1",
     "passport": "0.7.0",
     "passport-jwt": "4.0.1",

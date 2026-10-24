@@ -44,7 +44,7 @@ export class WorkspaceAccountController {
   async login(@Body() body: V2LoginDto) {
     const account = await this.auth.validateAccountCredentials(body.email, body.password);
     const session = await this.auth.signAccountSession(account.id);
-    return { session, user: { id: account.id, email: account.email, displayName: account.displayName, revision: account.revision }, contexts: await this.contexts.listMyContexts(account.id) };
+    return { session, user: { id: account.id, email: account.email, displayName: account.displayName, revision: account.revision, catalogManage: Boolean(await this.prisma.catalogGrant.findUnique({ where: { userId: account.id } })) }, contexts: await this.contexts.listMyContexts(account.id) };
   }
 
   @ApiBearerAuth() @Post('auth/logout') @HttpCode(204)
@@ -55,7 +55,7 @@ export class WorkspaceAccountController {
   async me(@CurrentUser() user: AuthUser) {
     const row = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!row) throw notFound();
-    return { item: { id: row.id, email: row.email, displayName: row.displayName, revision: row.revision } };
+    return { item: { id: row.id, email: row.email, displayName: row.displayName, revision: row.revision, catalogManage: Boolean(await this.prisma.catalogGrant.findUnique({ where: { userId: user.id } })) } };
   }
 
   @ApiBearerAuth() @Patch('me') @ApiOkResponse(objectResponse)
@@ -66,7 +66,7 @@ export class WorkspaceAccountController {
     const updated = await this.prisma.user.updateMany({ where: { id: user.id, revision: expected }, data: { displayName, revision: { increment: 1 } } });
     if (updated.count !== 1) throw new AppError(412, 'revision_mismatch', 'Профиль изменился. Обновите страницу.');
     const row = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    return { item: { id: row.id, email: row.email, displayName: row.displayName, revision: row.revision }, changed: ['me'], requestId: requestId(req) };
+    return { item: { id: row.id, email: row.email, displayName: row.displayName, revision: row.revision, catalogManage: Boolean(await this.prisma.catalogGrant.findUnique({ where: { userId: user.id } })) }, changed: ['me'], requestId: requestId(req) };
   }
 
   @ApiBearerAuth() @Get('me/workspaces') @ApiOkResponse(listResponse)

@@ -119,4 +119,20 @@ describe('WorkspaceApp', () => {
     await waitFor(() => expect(client.setSuspended).toHaveBeenCalledTimes(1));
     confirm.mockRestore();
   });
+
+  it('opens the global catalog for a catalog editor without workspace membership', async () => {
+    const client = api({
+      login: vi.fn(async () => ({ user: { ...account, catalogManage: true }, contexts: [] })),
+      subjects: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 25 })),
+      programs: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 25 })),
+    });
+    createWorkspaceClient.mockReturnValue(client);
+    render(React.createElement(WorkspaceApp, { onLegacy: vi.fn() }));
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: account.email } });
+    fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    await screen.findByRole('tab', { name: 'Предметы' });
+    expect(screen.getByRole('button', { name: 'Создать предмет' })).toBeTruthy();
+    expect(client.subjects).toHaveBeenCalledWith(null, { q: '', status: '', page: 1, pageSize: 25 });
+  });
 });

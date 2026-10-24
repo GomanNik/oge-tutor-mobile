@@ -35,6 +35,16 @@ export function createWorkspaceClient() {
     return `/workspaces/${encodeURIComponent(context.workspaceId)}${suffix}`;
   }
 
+  function catalogQuery(context, query = {}) {
+    return new URLSearchParams(Object.entries({ ...(context ? { workspaceId: context.workspaceId } : {}), ...query })
+      .filter(([, value]) => value !== undefined && value !== '')).toString();
+  }
+
+  function catalogPath(path, context, query) {
+    const encoded = catalogQuery(context, query);
+    return `${path}${encoded ? `?${encoded}` : ''}`;
+  }
+
   return {
     hasToken: () => Boolean(token),
     clearToken: () => setToken(''),
@@ -61,6 +71,28 @@ export function createWorkspaceClient() {
     resendInvitation: (context, invite) => request(pathFor(context, `/invitations/${invite.id}/resend`), { method: 'POST', context, revision: invite.revision, body: {} }),
     revokeInvitation: (context, invite) => request(pathFor(context, `/invitations/${invite.id}/revoke`), { method: 'POST', context, revision: invite.revision, body: {} }),
     audit: (context, query = {}) => request(`${pathFor(context, '/audit-events')}?${new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== '')).toString()}`, { context }),
+    subjects: (context, query) => request(catalogPath('/subjects', context, query), { context }),
+    createSubject: (context, body) => request('/subjects', { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body: { ...(context ? { workspaceId: context.workspaceId } : {}), ...body } }),
+    updateSubject: (context, item, name) => request(`/subjects/${encodeURIComponent(item.id)}`, { method: 'PATCH', context, revision: item.revision, body: { name } }),
+    archiveSubject: (context, item) => request(`/subjects/${encodeURIComponent(item.id)}/archive`, { method: 'POST', context, revision: item.revision, body: {} }),
+    programs: (context, query) => request(catalogPath('/programs', context, query), { context }),
+    createProgram: (context, body) => request('/programs', { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body: { ...(context ? { workspaceId: context.workspaceId } : {}), ...body } }),
+    updateProgram: (context, item, name) => request(`/programs/${encodeURIComponent(item.id)}`, { method: 'PATCH', context, revision: item.revision, body: { name } }),
+    archiveProgram: (context, item) => request(`/programs/${encodeURIComponent(item.id)}/archive`, { method: 'POST', context, revision: item.revision, body: {} }),
+    versions: (context, programId, query) => request(catalogPath(`/programs/${encodeURIComponent(programId)}/versions`, context, query), { context }),
+    version: (context, id) => request(`/program-versions/${encodeURIComponent(id)}`, { context }),
+    createVersion: (context, programId, body) => request(`/programs/${encodeURIComponent(programId)}/versions`, { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body }),
+    updateVersion: (context, item, body) => request(`/program-versions/${encodeURIComponent(item.id)}`, { method: 'PATCH', context, revision: item.revision, body }),
+    publishVersion: (context, item) => request(`/program-versions/${encodeURIComponent(item.id)}/publish`, { method: 'POST', context, revision: item.revision, body: {} }),
+    archiveVersion: (context, item) => request(`/program-versions/${encodeURIComponent(item.id)}/archive`, { method: 'POST', context, revision: item.revision, body: {} }),
+    catalogTasks: (context, versionId, query) => request(catalogPath(`/program-versions/${encodeURIComponent(versionId)}/tasks`, context, query), { context }),
+    createCatalogTask: (context, version, body) => request(`/program-versions/${encodeURIComponent(version.id)}/tasks`, { method: 'POST', context, revision: version.revision, body }),
+    updateCatalogTask: (context, version, task, body) => request(`/program-versions/${encodeURIComponent(version.id)}/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', context, revision: version.revision, body }),
+    deleteCatalogTask: (context, version, task) => request(`/program-versions/${encodeURIComponent(version.id)}/tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE', context, revision: version.revision }),
+    setScoringRule: (context, version, body) => request(`/program-versions/${encodeURIComponent(version.id)}/scoring-rule`, { method: 'POST', context, revision: version.revision, body }),
+    taskMappings: (context, fromVersionId, toVersionId, query) => request(catalogPath('/task-mappings', context, { fromVersionId, toVersionId, ...query }), { context }),
+    createTaskMapping: (context, body) => request('/task-mappings', { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body }),
+    revokeTaskMapping: (context, item, reason) => request(`/task-mappings/${encodeURIComponent(item.id)}/revoke`, { method: 'POST', context, revision: item.revision, body: { reason } }),
     async acceptNew(tokenValue, displayName, password) {
       const result = await request('/invitations/accept-new', { method: 'POST', body: { token: tokenValue, displayName, password } });
       setToken(result.session.token);

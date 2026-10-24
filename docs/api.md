@@ -1,6 +1,6 @@
 # HTTP API
 
-This page describes the **currently implemented API**. Workspace identity and administration are implemented under `/api/v2`; subjects, courses and groups in [platform/api-target.md](platform/api-target.md) remain future design.
+This page describes the **currently implemented API**. Workspace identity, administration, and the versioned exam catalog are implemented under `/api/v2`; courses and groups in [platform/api-target.md](platform/api-target.md) remain future design.
 
 The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. The legacy routes below have no `/api` prefix; new workspace routes use `/api/v2`. Protected calls use `Authorization: Bearer <JWT>`; health, login, password-reset, access-token verification/completion and v2 invitation acceptance for a new account are public. Rate limits apply to public authentication routes.
 
@@ -11,6 +11,21 @@ The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` w
 `GET /api/v2/workspaces/:workspaceId` reads the selected active workspace. Its `members`, `invitations` and `audit-events` routes provide scoped cursor pages; only an active workspace administrator can use the management routes. `POST /api/v2/invitations/accept-new` creates an account from a valid email invitation, while `accept-existing` adds a matching logged-in account. There is no public workspace creation or self-registration. See [the block 1 contract and operations](platform/block-1-operations.md) and the exact DTOs/errors in Swagger.
 
 Every workspace request requires `X-Active-Role`; the server rechecks membership and grant on each request. State transitions require `If-Match` revision (428 missing, 412 stale), while new invitations and grants require `Idempotency-Key`. Mutations return `{item,changed,requestId}`, not a full cabinet. A new `student`/`teacher` role does not create legacy educational records; courses and groups are not yet implemented.
+
+## Exam catalog v2 (Block 2)
+
+The catalog routes require a Bearer session. Global subjects and published/archived program versions are readable by authenticated users; a local catalog additionally requires active workspace membership, `workspaceId` on list requests, and a valid `X-Active-Role` on every request. Local administrators manage only their own workspace's catalog. A separate operator-managed `CatalogGrant` controls global writes; it is not implied by the workspace admin role. Draft versions are visible only to their catalog managers.
+
+| Routes after `/api/v2` | Purpose |
+|---|---|
+| `GET/POST /subjects`, `GET/PATCH /subjects/:id`, `POST /subjects/:id/archive` | Filter, create, read, rename and archive subjects. |
+| `GET/POST /programs`, `GET/PATCH /programs/:id`, `POST /programs/:id/archive` | Programs distinguished by exam type, subject and variant. |
+| `GET/POST /programs/:id/versions`, `GET/PATCH /program-versions/:id`, `POST /program-versions/:id/publish`, `POST /program-versions/:id/archive` | Draft, publish and archive immutable exam versions. |
+| `GET/POST /program-versions/:id/tasks`, `PATCH/DELETE /program-versions/:id/tasks/:taskId` | Version-local task definitions; writes require a draft. |
+| `POST /program-versions/:id/scoring-rule` | Scoring rule metadata for a draft. This does not execute a forecast. |
+| `GET/POST /task-mappings`, `POST /task-mappings/:id/revoke` | Explicit task equivalence between versions of one program, with auditable revocation. |
+
+Catalog lists return `{items,total,page,pageSize}` with bounded pagination. Creates require `Idempotency-Key`; state changes require `If-Match` (the version's revision for task/rule writes). Missing/stale revision yields 428/412; invalid transitions yield 409. Mutations return `{item,changed,requestId}`, task/rule mutations also return `versionRevision`. Full DTOs, filters and error schemas appear in Swagger. See [Block 2 operations and acceptance](platform/block-2-catalog.md).
 
 ## Response Contract
 

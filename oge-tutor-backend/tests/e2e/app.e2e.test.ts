@@ -107,6 +107,8 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(memberPath.get?.responses['200'].content?.['application/json'].schema).toEqual({ $ref: '#/components/schemas/V2MemberPage' });
     expect(document.components.schemas.V2Member.properties).not.toHaveProperty('passwordHash');
     expect(document.components.schemas.V2Invitation.properties).not.toHaveProperty('tokenHash');
+    expect(document.components.schemas.V2ProgramVersion.properties?.program).toEqual({ $ref: '#/components/schemas/V2Program' });
+    expect(document.paths['/api/v2/program-versions/{id}'].get?.responses['200'].content?.['application/json'].schema).toEqual({ $ref: '#/components/schemas/V2ProgramVersionDetail' });
     const update = document.paths['/api/v2/workspaces/{workspaceId}/members/{memberId}'].patch;
     expect(update?.responses).toHaveProperty('412');
     expect(update?.responses).toHaveProperty('428');
@@ -806,5 +808,95 @@ describeIfDb('AppModule e2e production flows', () => {
       .send({ email: 'rate-target-e2e@mail.ru', roles: ['student'] });
     for (let attempt = 0; attempt < 5; attempt += 1) await send().expect(200);
     await send().expect(429).expect(({ body }) => expect(body.code).toBe('rate_limited'));
+  });
+
+  it('manages isolated multi-exam catalogs with immutable published versions', async () => {
+    const passwordHash = await bcrypt.hash('catalog-pass-123', 4);
+    const [adminA, adminB, globalEditor] = await Promise.all([
+      prisma.user.create({ data: { email: 'catalog-a-e2e@mail.ru', displayName: 'Catalog Admin A', passwordHash } }),
+      prisma.user.create({ data: { email: 'catalog-b-e2e@mail.ru', displayName: 'Catalog Admin B', passwordHash } }),
+      prisma.user.create({ data: { email: 'catalog-global-e2e@mail.ru', displayName: 'Catalog Editor', passwordHash } }),
+    ]);
+    const [a, b] = await Promise.all([
+      prisma.workspace.create({ data: { name: 'Catalog A', slug: 'catalog-a-e2e' } }),
+      prisma.workspace.create({ data: { name: 'Catalog B', slug: 'catalog-b-e2e' } }),
+    ]);
+    await Promise.all([
+      prisma.workspaceMembership.create({ data: { workspaceId: a.id, userId: adminA.id, roles: { create: [{ role: 'admin' }] } } }),
+      prisma.workspaceMembership.create({ data: { workspaceId: b.id, userId: adminB.id, roles: { create: [{ role: 'admin' }] } } }),
+      prisma.catalogGrant.create({ data: { userId: globalEditor.id } }),
+    ]);
+    const login = async (email: string) => (await request(server).post('/api/v2/auth/login').send({ email, password: 'catalog-pass-123' }).expect(200)).body.session.token;
+    const [tokenA, tokenB, globalToken] = await Promise.all([login(adminA.email), login(adminB.email), login(globalEditor.email)]);
+    await request(server).get('/api/v2/me').set(auth(globalToken)).expect(200)
+      .expect(({ body }) => expect(body.item.catalogManage).toBe(true));
+    await request(server).get('/api/v2/me').set(auth(tokenA)).expect(200)
+      .expect(({ body }) => expect(body.item.catalogManage).toBe(false));
+    const headersA = { ...auth(tokenA), 'X-Active-Role': 'admin' };
+    const headersB = { ...auth(tokenB), 'X-Active-Role': 'admin' };
+    const create = (path: string, headers: Record<string, string>, key: string, body: object) => request(server).post(path).set(headers).set('Idempotency-Key', key).send(body);
+
+    await create('/api/v2/subjects', headersA, 'global-denied', { code: 'physics', name: 'Физика' }).expect(403);
+    const globalSubject = await create('/api/v2/subjects', auth(globalToken), 'global-math', { code: 'math-e2e', name: 'Математика' }).expect(200);
+    const localSubject = await create('/api/v2/subjects', headersA, 'local-physics', { workspaceId: a.id, code: 'physics', name: 'Физика' }).expect(200);
+    await create('/api/v2/subjects', headersA, 'local-physics', { workspaceId: a.id, code: 'physics', name: 'Физика' }).expect(200)
+      .expect(({ body }) => expect(body.item.id).toBe(localSubject.body.item.id));
+    await create('/api/v2/subjects', headersA, 'local-physics', { workspaceId: a.id, code: 'chemistry', name: 'Химия' }).expect(409);
+    await request(server).get(`/api/v2/subjects/${localSubject.body.item.id}`).set(headersB).expect(404);
+    await request(server).get(`/api/v2/subjects?workspaceId=${b.id}`).set(headersB).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).not.toContain(localSubject.body.item.id));
+    await request(server).get(`/api/v2/subjects?workspaceId=${a.id}`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([globalSubject.body.item.id, localSubject.body.item.id])));
+
+    const programBody = { workspaceId: a.id, subjectId: globalSubject.body.item.id, examType: 'ege', variant: 'base', code: 'ege-math-base-e2e', name: 'ЕГЭ · математика · база' };
+    const program = await create('/api/v2/programs', headersA, 'program-base', programBody).expect(200);
+    await create('/api/v2/programs', headersB, 'cross-scope', { ...programBody, workspaceId: b.id, subjectId: localSubject.body.item.id }).expect(422);
+    await create('/api/v2/programs', headersA, 'program-profile', { ...programBody, variant: 'profile', code: 'ege-math-profile-e2e', name: 'ЕГЭ · математика · профиль' }).expect(200);
+    await create('/api/v2/programs', headersA, 'program-oge', { ...programBody, examType: 'oge', variant: 'general', code: 'oge-math-e2e', name: 'ОГЭ · математика' }).expect(200);
+    const version = await create(`/api/v2/programs/${program.body.item.id}/versions`, headersA, 'version-one', { period: '2027', revisionNumber: 1, sourceUrl: 'https://example.org/catalog-2027' }).expect(200);
+    const versionId = version.body.item.id;
+    await request(server).get(`/api/v2/program-versions/${versionId}`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.item.program.id).toBe(program.body.item.id));
+    await request(server).post(`/api/v2/program-versions/${versionId}/publish`).set(headersA).set('If-Match', '0').send({}).expect(422);
+    const taskBody = { code: 'A-1', title: 'Первое задание', topics: ['Алгебра'], position: 1, kind: 'short_answer', maxScore: 2,
+      criteria: [{ code: 'score-1', title: 'Первый балл', maxScore: 1 }, { code: 'score-2', title: 'Второй балл', maxScore: 1 }] };
+    await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).set('If-Match', '0')
+      .send({ ...taskBody, criteria: [taskBody.criteria[0]] }).expect(422);
+    const task = await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).set('If-Match', '0').send(taskBody).expect(200);
+    expect(task.body.versionRevision).toBe(1);
+    await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).set('If-Match', '0').send({ ...taskBody, code: 'B-2', position: 2 }).expect(412);
+    const published = await request(server).post(`/api/v2/program-versions/${versionId}/publish`).set(headersA).set('If-Match', '1').send({}).expect(200);
+    expect(published.body.item.status).toBe('published');
+    await request(server).patch(`/api/v2/program-versions/${versionId}/tasks/${task.body.item.id}`).set(headersA).set('If-Match', '2').send({ ...taskBody, title: 'Новая редакция' }).expect(409);
+    await expect(prisma.$executeRawUnsafe('UPDATE "TaskDefinition" SET "title" = $1 WHERE "id" = $2', 'Direct rewrite', task.body.item.id)).rejects.toThrow();
+    await request(server).get(`/api/v2/program-versions/${versionId}/tasks?pageSize=1`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.items[0].title).toBe('Первое задание'));
+    await request(server).get(`/api/v2/program-versions/${versionId}`).set(headersB).expect(404);
+
+    const nextVersion = await create(`/api/v2/programs/${program.body.item.id}/versions`, headersA, 'version-two', { period: '2028', revisionNumber: 1, sourceUrl: 'https://example.org/catalog-2028' }).expect(200);
+    await expect(prisma.$executeRawUnsafe('UPDATE "TaskDefinition" SET "programVersionId" = $1 WHERE "id" = $2', nextVersion.body.item.id, task.body.item.id)).rejects.toThrow();
+    const nextTask = await request(server).post(`/api/v2/program-versions/${nextVersion.body.item.id}/tasks`).set(headersA).set('If-Match', '0')
+      .send({ ...taskBody, code: 'X-7', title: 'Переработанное задание' }).expect(200);
+    await request(server).post(`/api/v2/program-versions/${nextVersion.body.item.id}/publish`).set(headersA).set('If-Match', '1').send({}).expect(200);
+    const mapping = await create('/api/v2/task-mappings', headersA, 'map-tasks', { fromTaskId: task.body.item.id, toTaskId: nextTask.body.item.id, reason: 'Подтверждена эквивалентность заданий двух периодов.' }).expect(200);
+    await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.total).toBe(1));
+    await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}`).set(headersB).expect(404);
+    await request(server).post(`/api/v2/task-mappings/${mapping.body.item.id}/revoke`).set(headersA).send({ reason: 'Выявлена ошибка соответствия заданий.' }).expect(428);
+    await request(server).post(`/api/v2/task-mappings/${mapping.body.item.id}/revoke`).set(headersA).set('If-Match', '0').send({ reason: 'Выявлена ошибка соответствия заданий.' }).expect(200);
+    await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.total).toBe(0));
+    await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}&includeRevoked=true`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.items[0].revocationReason).toBe('Выявлена ошибка соответствия заданий.'));
+    const replacement = await create('/api/v2/task-mappings', headersA, 'map-tasks-corrected', { fromTaskId: task.body.item.id, toTaskId: nextTask.body.item.id, reason: 'После повторной проверки соответствие подтверждено.' }).expect(200);
+    expect(replacement.body.item.id).not.toBe(mapping.body.item.id);
+    await expect(prisma.$executeRawUnsafe('UPDATE "TaskMapping" SET "fromTaskId" = $1, "toTaskId" = $2 WHERE "id" = $3', nextTask.body.item.id, task.body.item.id, replacement.body.item.id)).rejects.toThrow();
+    await request(server).post(`/api/v2/program-versions/${versionId}/archive`).set(headersA).set('If-Match', '2').send({}).expect(200);
+    await request(server).get(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).expect(200);
+    expect(await prisma.catalogAuditEvent.count({ where: { workspaceId: a.id } })).toBeGreaterThanOrEqual(8);
+    await prisma.catalogGrant.delete({ where: { userId: globalEditor.id } });
+    await request(server).get('/api/v2/me').set(auth(globalToken)).expect(200)
+      .expect(({ body }) => expect(body.item.catalogManage).toBe(false));
+    await create('/api/v2/subjects', auth(globalToken), 'revoked-grant', { code: 'revoked-test', name: 'Недоступно' }).expect(403);
   });
 });
