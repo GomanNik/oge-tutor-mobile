@@ -4,12 +4,15 @@ async function assertNoHorizontalOverflow(page) {
   const widths = await page.evaluate(() => {
     const container = document.querySelector('.workspace-page');
     const viewport = document.documentElement.clientWidth;
+    const previousScrollLeft = container.scrollLeft;
+    container.scrollLeft = 0;
+    document.documentElement.scrollLeft = 0;
     const offenders = [...container.querySelectorAll('*')].map(element => ({
       tag: element.tagName.toLowerCase(), className: typeof element.className === 'string' ? element.className : '',
       label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 35) || '',
       right: Math.round(element.getBoundingClientRect().right),
     })).filter(item => item.right > viewport + 1).sort((a, b) => b.right - a.right).slice(0, 8);
-    return { viewport, content: Math.max(document.documentElement.scrollWidth, container.scrollWidth), containerWidth: container.clientWidth, offenders };
+    return { viewport, content: Math.max(document.documentElement.scrollWidth, container.scrollWidth), containerWidth: container.clientWidth, previousScrollLeft, offenders };
   });
   expect(widths.content, JSON.stringify(widths)).toBeLessThanOrEqual(widths.viewport + 1);
 }
