@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test';
 
+async function assertNoHorizontalOverflow(page) {
+  const widths = await page.evaluate(() => {
+    const container = document.querySelector('.workspace-page');
+    const viewport = document.documentElement.clientWidth;
+    const offenders = [...container.querySelectorAll('*')].map(element => ({
+      tag: element.tagName.toLowerCase(), className: typeof element.className === 'string' ? element.className : '',
+      label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 35) || '',
+      right: Math.round(element.getBoundingClientRect().right),
+    })).filter(item => item.right > viewport + 1).sort((a, b) => b.right - a.right).slice(0, 8);
+    return { viewport, content: Math.max(document.documentElement.scrollWidth, container.scrollWidth), containerWidth: container.clientWidth, offenders };
+  });
+  expect(widths.content, JSON.stringify(widths)).toBeLessThanOrEqual(widths.viewport + 1);
+}
+
 for (const viewport of [{ width: 390, height: 844 }, { width: 1365, height: 900 }]) {
   test(`course workflow on a real API at ${viewport.width}px`, async ({ page }, testInfo) => {
     test.skip(!process.env.COURSE_REAL_API_EMAIL || !process.env.COURSE_REAL_API_PASSWORD, 'Set disposable course fixture credentials to run the real API smoke test.');
@@ -44,11 +58,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1365, height: 900 
     await enrollmentEditor.getByLabel('Цель').fill('Решать задачи каждый день');
     await enrollmentEditor.getByRole('button', { name: 'Сохранить' }).click();
     await expect(page.locator('.course-detail').getByRole('row', { name: /Иван Петров/ })).toContainText('Решать задачи каждый день');
-    const widths = await page.evaluate(() => ({
-      viewport: document.documentElement.clientWidth,
-      content: Math.max(document.documentElement.scrollWidth, document.querySelector('.workspace-page').scrollWidth),
-    }));
-    expect(widths.content).toBeLessThanOrEqual(widths.viewport + 1);
+    await assertNoHorizontalOverflow(page);
     await page.locator('.workspace-page').evaluate(element => element.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath(`course-admin-${viewport.width}.png`) });
 
@@ -63,11 +73,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1365, height: 900 
     await expect(page.getByRole('heading', { name: 'Моё участие' })).toBeVisible();
     await expect(page.locator('.course-detail').getByText('Мария Соколова')).toHaveCount(0);
     await expect(page.getByText('2 / 2 мест')).toHaveCount(0);
-    const studentWidths = await page.evaluate(() => ({
-      viewport: document.documentElement.clientWidth,
-      content: Math.max(document.documentElement.scrollWidth, document.querySelector('.workspace-page').scrollWidth),
-    }));
-    expect(studentWidths.content).toBeLessThanOrEqual(studentWidths.viewport + 1);
+    await assertNoHorizontalOverflow(page);
     await page.locator('.workspace-page').evaluate(element => element.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath(`course-student-${viewport.width}.png`) });
     expect(failures).toEqual([]);
