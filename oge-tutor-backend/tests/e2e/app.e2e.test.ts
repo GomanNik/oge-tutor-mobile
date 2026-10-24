@@ -107,6 +107,8 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(memberPath.get?.responses['200'].content?.['application/json'].schema).toEqual({ $ref: '#/components/schemas/V2MemberPage' });
     expect(document.components.schemas.V2Member.properties).not.toHaveProperty('passwordHash');
     expect(document.components.schemas.V2Invitation.properties).not.toHaveProperty('tokenHash');
+    expect(document.components.schemas.V2ProgramVersion.properties?.program).toEqual({ $ref: '#/components/schemas/V2Program' });
+    expect(document.paths['/api/v2/program-versions/{id}'].get?.responses['200'].content?.['application/json'].schema).toEqual({ $ref: '#/components/schemas/V2ProgramVersionDetail' });
     const update = document.paths['/api/v2/workspaces/{workspaceId}/members/{memberId}'].patch;
     expect(update?.responses).toHaveProperty('412');
     expect(update?.responses).toHaveProperty('428');
@@ -853,6 +855,8 @@ describeIfDb('AppModule e2e production flows', () => {
     await create('/api/v2/programs', headersA, 'program-oge', { ...programBody, examType: 'oge', variant: 'general', code: 'oge-math-e2e', name: 'ОГЭ · математика' }).expect(200);
     const version = await create(`/api/v2/programs/${program.body.item.id}/versions`, headersA, 'version-one', { period: '2027', revisionNumber: 1, sourceUrl: 'https://example.org/catalog-2027' }).expect(200);
     const versionId = version.body.item.id;
+    await request(server).get(`/api/v2/program-versions/${versionId}`).set(headersA).expect(200)
+      .expect(({ body }) => expect(body.item.program.id).toBe(program.body.item.id));
     await request(server).post(`/api/v2/program-versions/${versionId}/publish`).set(headersA).set('If-Match', '0').send({}).expect(422);
     const taskBody = { code: 'A-1', title: 'Первое задание', topics: ['Алгебра'], position: 1, kind: 'short_answer', maxScore: 2,
       criteria: [{ code: 'score-1', title: 'Первый балл', maxScore: 1 }, { code: 'score-2', title: 'Второй балл', maxScore: 1 }] };
