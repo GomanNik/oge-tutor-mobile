@@ -1,6 +1,6 @@
 # Блок 1. Пространства, идентичность и управление участниками
 
-Статус: **спецификация к реализации, не реализовано**. Версия: 2026-10-22. Реализация — один отдельный PR с последовательными коммитами; этот документ не означает, что API v2 уже существует. Термины и долгосрочные правила заданы в [индексе](README.md), [домене](domain.md), [архитектуре](architecture.md) и [политике доступа](access.md).
+Статус: **контракт блока 1 и чек-лист приёмки; реализация проходит проверку в черновом PR, промышленный rollout не выполнен**. Версия: 2026-10-22. Фактические результаты и условия до merge указаны в [отчёте](block-1-verification.md); работающий API v2 ограничен блоком 1. Термины и долгосрочные правила заданы в [индексе](README.md), [домене](domain.md), [архитектуре](architecture.md) и [политике доступа](access.md).
 
 ## 1. Цель и результат блока
 
@@ -121,7 +121,8 @@ type PageInput = { cursor?: string; limit: number };
 type Page<T> = { items: T[]; pageInfo: { nextCursor: string | null; hasMore: boolean } };
 type Versioned = { revision: number };
 type Mutation<T> = { item: T; changed: string[]; requestId: string };
-type MyWorkspaceDto = { workspaceId: string; name: string; status: 'active'; roles: WorkspaceRole[] };
+type MyWorkspaceDto = { workspaceId: string; name: string; status: 'active'; roles: WorkspaceRole[];
+  legacyRole: 'teacher' | 'student' | null };
 type MeDto = { id: string; email: string; displayName: string; revision: number };
 type SessionDto = { token: string; userId: string; expiresAt: string };
 type LoginResultDto = { session: SessionDto; user: MeDto; contexts: MyWorkspaceDto[] };
@@ -135,7 +136,7 @@ type InvitationDto = Versioned & {
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   deliveryStatus: 'queued' | 'sent' | 'failed';
 };
-type AuditScalar = string | number | boolean | null;
+type AuditScalar = string | number | boolean | null | WorkspaceRole[];
 type AuditEventDto = {
   id: string; actorUserId: string | null; action: string;
   targetType: string; targetId: string; reason: string | null;

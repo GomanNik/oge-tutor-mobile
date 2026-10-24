@@ -11,14 +11,16 @@ import * as Materials from '../materials/materials.dto';
 import * as Progress from '../progress/progress.dto';
 import * as Students from '../students/students.dto';
 import * as Teacher from '../teacher/teacher.dto';
+import * as Workspace from '../workspace/workspace.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
+  ...Object.values(Workspace),
 ];
-const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete']);
+const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
 
 export interface OperationContract {
@@ -66,6 +68,28 @@ const mutationRequests: Record<string, string> = {
   'patch /students/{}/progress/tasks/{}': 'UpdateTaskProgressDto',
   'post /students/{}/progress/tasks/{}/assessment': 'ResolveAssessmentDto',
 };
+const workspaceContracts: OperationContracts = {
+  'post /api/v2/auth/login': { request: 'V2LoginDto', response: 'V2LoginResponse' },
+  'get /api/v2/me': { response: 'V2UserDetail' },
+  'patch /api/v2/me': { request: 'UpdateMeDto', response: 'V2UserMutation' },
+  'get /api/v2/me/workspaces': { response: 'V2ContextsPage' },
+  'get /api/v2/workspaces/{}': { response: 'V2WorkspaceDetail' },
+  'get /api/v2/workspaces/{}/members': { response: 'V2MemberPage' },
+  'get /api/v2/workspaces/{}/members/{}': { response: 'V2MemberDetail' },
+  'patch /api/v2/workspaces/{}/members/{}': { request: 'UpdateLocalNameDto', response: 'V2MemberMutation' },
+  'post /api/v2/workspaces/{}/members/{}/roles': { request: 'GrantRoleDto', response: 'V2MemberMutation' },
+  'post /api/v2/workspaces/{}/members/{}/roles/{}/revoke': { request: 'ReasonDto', response: 'V2MemberMutation' },
+  'post /api/v2/workspaces/{}/members/{}/suspend': { request: 'ReasonDto', response: 'V2MemberMutation' },
+  'post /api/v2/workspaces/{}/members/{}/resume': { request: 'ReasonDto', response: 'V2MemberMutation' },
+  'get /api/v2/workspaces/{}/invitations': { response: 'V2InvitationPage' },
+  'post /api/v2/workspaces/{}/invitations': { request: 'CreateInvitationDto', response: 'V2InvitationMutation' },
+  'post /api/v2/workspaces/{}/invitations/{}/resend': { request: 'OptionalReasonDto', response: 'V2InvitationMutation' },
+  'post /api/v2/workspaces/{}/invitations/{}/revoke': { request: 'OptionalReasonDto', response: 'V2InvitationMutation' },
+  'get /api/v2/workspaces/{}/audit-events': { response: 'V2AuditPage' },
+  'post /api/v2/invitations/accept-new': { request: 'AcceptNewInvitationDto', response: 'V2LoginResponse' },
+  'post /api/v2/invitations/accept-existing': { request: 'AcceptExistingInvitationDto', response: 'V2MemberDetail' },
+};
+Object.assign(contracts, workspaceContracts);
 for (const [key, request] of Object.entries(mutationRequests)) {
   contracts[key] = { request, response: key.endsWith('/security/password') ? 'OkResponse' : 'MutationResponse', multipart: key.endsWith('/submissions') };
 }
@@ -109,6 +133,12 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       if (!operation.parameters.some(p => !('$ref' in p) && p.in === 'header' && p.name === 'x-request-id')) {
         operation.parameters.push({ name: 'x-request-id', in: 'header', required: false, schema: { type: 'string' }, description: 'Optional correlation identifier, echoed in error responses.' });
       }
+      if (path.startsWith('/api/v2/') && method !== 'get') {
+        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend)$/.test(path);
+        const isIdempotentMutation = /\/invitations$|\/roles$/.test(path);
+        if (isRevisionMutation) operation.parameters.push({ name: 'If-Match', in: 'header', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Expected resource revision.' });
+        if (isIdempotentMutation) operation.parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
+      }
       for (const parameter of operation.parameters) {
         if ('$ref' in parameter || parameter.in !== 'path') continue;
         parameter.required = true;
@@ -141,8 +171,12 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       }
       const errors: Record<string, string> = { '400': 'DTO or request validation failed.', '422': 'Domain validation failed.', '429': 'Rate limit exceeded.', '500': 'Unexpected server error.' };
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
-      if (path === '/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
+      if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
+      if (path.startsWith('/api/v2/') && (method === 'patch' || /\/(revoke|suspend|resume|resend)$/.test(path))) {
+        errors['412'] = 'Revision mismatch.';
+        errors['428'] = 'If-Match header is required.';
+      }
       if (path.startsWith('/auth/access-token/')) errors['403'] = 'Account access disabled.';
       if (contract?.multipart) errors['413'] = 'Upload exceeds configured size limit.';
       if (path === '/health/ready') errors['503'] = 'Service not ready.';

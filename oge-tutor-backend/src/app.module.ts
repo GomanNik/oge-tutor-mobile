@@ -18,6 +18,8 @@ import { ProgressModule } from './progress/progress.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RoleGuard } from './common/role.guard';
+import { LegacyAccessGuard } from './workspace/legacy.guard';
+import { WorkspaceModule } from './workspace/workspace.module';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
 import { validateEnv } from './config/env.validation';
@@ -46,10 +48,12 @@ import { authTargetTracker, AUTH_THROTTLE_TTL_MS } from './auth/auth-throttle';
     MaterialsModule,
     ProgressModule,
     HealthModule,
+    WorkspaceModule,
   ],
   providers: [
     JwtStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: LegacyAccessGuard },
     { provide: APP_GUARD, useClass: RoleGuard },
     { provide: APP_INTERCEPTOR, useClass: OperationLoggerInterceptor },
   ],

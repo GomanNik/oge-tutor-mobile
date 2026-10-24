@@ -2,9 +2,10 @@
  * OGE Tutor Backend — operation logger interceptor.
  * Logs every controller action with role/profile context and duration, while avoiding sensitive payload values.
  */
-import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, HttpException, Injectable, Logger, NestInterceptor } from '@nestjs/common';
 import { Request } from 'express';
 import { Observable, catchError, tap, throwError } from 'rxjs';
+import { AppError } from './app-error';
 
 type RequestWithContext = Request & {
   requestId?: string;
@@ -68,8 +69,9 @@ export class OperationLoggerInterceptor implements NestInterceptor {
         this.logger.log(JSON.stringify({ event: 'operation_ok', ...baseLog, durationMs: Date.now() - startedAt }));
       }),
       catchError((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(JSON.stringify({ event: 'operation_fail', ...baseLog, durationMs: Date.now() - startedAt, error: message }));
+        const statusCode = error instanceof AppError ? error.status : error instanceof HttpException ? error.getStatus() : 500;
+        const errorCode = error instanceof AppError ? error.code : statusCode < 500 ? `http_${statusCode}` : 'internal_error';
+        this.logger.error(JSON.stringify({ event: 'operation_fail', ...baseLog, durationMs: Date.now() - startedAt, statusCode, errorCode }));
         return throwError(() => error);
       }),
     );

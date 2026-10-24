@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { AppError, conflict } from '../common/app-error';
 import { ROLE } from '../common/contracts';
 import { cleanText, requireText, validateEmail, validatePassword } from '../common/validation';
+import { ensureLegacyTeacher } from '../workspace/legacy';
 
 type BootstrapTeacherInput = {
   email: string;
@@ -59,12 +60,13 @@ async function createInitialTeacher(input: BootstrapTeacherInput) {
     const user = await tx.user.create({
       data: {
         email: input.email,
+        displayName: input.name,
         passwordHash,
         role: ROLE.TEACHER,
       },
     });
 
-    return tx.teacherProfile.create({
+    const teacher = await tx.teacherProfile.create({
       data: {
         userId: user.id,
         name: input.name,
@@ -74,6 +76,8 @@ async function createInitialTeacher(input: BootstrapTeacherInput) {
       },
       include: { user: true },
     });
+    await ensureLegacyTeacher(tx, teacher.id);
+    return teacher;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

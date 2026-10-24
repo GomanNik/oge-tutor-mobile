@@ -40,7 +40,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: config.get<string>('FRONTEND_ORIGIN') || 'http://localhost:5173',
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'X-Active-Role', 'If-Match', 'Idempotency-Key'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 

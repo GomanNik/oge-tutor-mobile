@@ -34,6 +34,8 @@ function fixture() {
     },
     teacherProfile: { findUnique: vi.fn(async () => ({ id: 't-1', userId: user.id, user })) },
     studentProfile: { findUnique: vi.fn(async () => ({ id: 's-1', userId: user.id, user })) },
+    legacyWorkspaceMapping: { findUnique: vi.fn(async () => ({ workspaceId: 'w-1', workspace: { status: 'active' } })) },
+    workspaceMembership: { findUnique: vi.fn(async () => ({ status: 'active', roles: [{ role: user.role, revokedAt: null }] })) },
   };
   const jwt = new JwtService();
   const auth = new AuthService(prisma as any, jwt, config, {} as any, {} as any);
@@ -70,7 +72,7 @@ describe('persisted JWT sessions', () => {
     await expect(fixture().strategy.validate(payload)).rejects.toMatchObject({ code: 'unauthorized' });
   });
 
-  it.each(['expired', 'foreign', 'revoked', 'old-version', 'disabled'])('rejects a %s session', async (reason) => {
+  it.each(['expired', 'foreign', 'revoked', 'old-version'])('rejects a %s session', async (reason) => {
     const f = fixture();
     const payload = f.jwt.decode((await f.auth.signSession(f.user)).token);
     const session = f.sessions.get(payload.sid);
@@ -78,8 +80,14 @@ describe('persisted JWT sessions', () => {
     if (reason === 'foreign') session.userId = 'another-user';
     if (reason === 'revoked') session.revokedAt = new Date();
     if (reason === 'old-version') f.user.sessionVersion++;
-    if (reason === 'disabled') Object.assign(f.user, { role: ROLE.STUDENT, studentProfile: { id: 's-1', access: 'disabled' } });
     await expect(f.strategy.validate(payload)).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('keeps account identity available when one legacy student profile is disabled', async () => {
+    const f = fixture();
+    const payload = f.jwt.decode((await f.auth.signSession(f.user)).token);
+    Object.assign(f.user, { role: ROLE.STUDENT, studentProfile: { id: 's-1', access: 'disabled' } });
+    await expect(f.strategy.validate(payload)).resolves.toMatchObject({ id: f.user.id, role: ROLE.STUDENT });
   });
 
   it('rejects credentials validated before a password change', async () => {

@@ -9,6 +9,7 @@ import { conflict, forbidden, notFound, validationError } from '../common/app-er
 import { cleanText, validateEmail, validatePassword } from '../common/validation';
 import { AccessTokenService } from '../auth/access-token.service';
 import { AuthMailerService } from '../auth/auth-mailer.service';
+import { ensureLegacyStudent, syncLegacyStudentAccess } from '../workspace/legacy';
 
 @Injectable()
 export class StudentsService {
@@ -53,7 +54,7 @@ export class StudentsService {
     const rawPassword = randomBytes(32).toString('base64url');
     const passwordHash = await bcrypt.hash(validatePassword(rawPassword), 12);
     const result = await this.prisma.$transaction(async (tx) => {
-      const studentUser = await tx.user.create({ data: { email, passwordHash, role: ROLE.STUDENT } });
+      const studentUser = await tx.user.create({ data: { email, passwordHash, role: ROLE.STUDENT, displayName: name } });
       const student = await tx.studentProfile.create({
         data: {
           userId: studentUser.id,
@@ -68,6 +69,7 @@ export class StudentsService {
           settings: payload.settings || {},
         },
       });
+      await ensureLegacyStudent(tx, student.id);
       const invite = await this.accessTokens.createForUser(studentUser.id, ACCESS_TOKEN_TYPE.INVITE, tx as any);
       return { student, invite };
     });
@@ -84,9 +86,16 @@ export class StudentsService {
       if (user.role !== ROLE.TEACHER) throw forbidden('Заметку преподавателя может менять только преподаватель.');
       data.note = cleanText(patch.note);
     }
-    return this.prisma.studentProfile.update({
-      where: { id: studentId },
-      data,
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.studentProfile.update({ where: { id: studentId }, data });
+      const mapping = await tx.legacyWorkspaceMapping.findUnique({ where: { teacherProfileId: updated.teacherId } });
+      if (mapping) {
+        await tx.workspaceMembership.updateMany({
+          where: { workspaceId: mapping.workspaceId, userId: updated.userId },
+          data: { displayNameOverride: name, revision: { increment: 1 } },
+        });
+      }
+      return updated;
     });
   }
 
@@ -125,7 +134,11 @@ export class StudentsService {
       : action === STUDENT_ACCESS_ACTION.RESEND_INVITE ? ACCESS_STATUS.INVITE_SENT
       : '';
     if (!access) throw validationError('Некорректное действие доступа.', { action: 'invalid' });
-    const updated = await this.prisma.studentProfile.update({ where: { id: studentId }, data: { access } });
+    const updated = await this.prisma.$transaction(async tx => {
+      const result = await tx.studentProfile.update({ where: { id: studentId }, data: { access } });
+      await syncLegacyStudentAccess(tx, studentId, access);
+      return result;
+    });
     if (action === STUDENT_ACCESS_ACTION.RESEND_INVITE) {
       const invite = await this.accessTokens.createForUser(student.userId, ACCESS_TOKEN_TYPE.INVITE);
       await this.mailer.sendAccessTokenLink({ email: student.user.email, type: ACCESS_TOKEN_TYPE.INVITE, delivery: invite.delivery, preview: invite.preview });

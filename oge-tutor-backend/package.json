@@ -15,7 +15,8 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node --project tsconfig.json prisma/seed.ts",
     "demo:seed": "ts-node --project tsconfig.json prisma/demo-seed.ts",
-    "bootstrap:teacher": "ts-node --project tsconfig.json src/cli/bootstrap-teacher.ts"
+    "bootstrap:teacher": "ts-node --project tsconfig.json src/cli/bootstrap-teacher.ts",
+    "workspace:operator": "ts-node --project tsconfig.json src/cli/workspace-operator.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.1.27",
@@ -33,7 +34,7 @@
     "express": "^5.2.1",
     "file-type": "21.3.4",
     "multer": "2.4.0",
-    "nodemailer": "10.0.9",
+    "nodemailer": "10.2.1",
     "passport": "0.7.0",
     "passport-jwt": "4.0.1",
     "reflect-metadata": "0.2.2",

@@ -10,6 +10,7 @@ Required in production:
 NODE_ENV=production
 DATABASE_URL=postgresql://...
 JWT_SECRET=long-random-secret
+WORKSPACE_INVITE_KEY=independent-random-secret-at-least-32-characters
 PUBLIC_BACKEND_URL=https://api.example.com
 APP_FRONTEND_URL=https://app.example.com
 FRONTEND_ORIGIN=https://app.example.com
@@ -37,6 +38,7 @@ BOOTSTRAP_TEACHER_NAME=Teacher Name
 `BOOTSTRAP_TEACHER_*` values are read only by the one-time `pnpm --dir oge-tutor-backend run bootstrap:teacher` command. They are not required for normal backend startup and should not be kept in long-lived `.env` files after the first teacher is created.
 
 Production validation rejects missing `DATABASE_URL`, weak/default `JWT_SECRET`, missing public URLs and incomplete SMTP configuration.
+`WORKSPACE_INVITE_KEY` encrypts pending invitation links in the database outbox. Keep it distinct from `JWT_SECRET`, at least 32 characters long, and retain it while undelivered invitations exist. In development an unset key falls back to `JWT_SECRET`.
 
 Development and tests may use:
 
@@ -84,6 +86,7 @@ DEPLOY_SSH_KEY
 DEPLOY_PATH
 DATABASE_URL
 JWT_SECRET
+WORKSPACE_INVITE_KEY
 PUBLIC_BACKEND_URL
 APP_FRONTEND_URL
 FRONTEND_ORIGIN
