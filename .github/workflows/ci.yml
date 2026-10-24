@@ -266,7 +266,7 @@ jobs:
       - name: Apply migrations and bootstrap
         run: |
           pnpm --dir oge-tutor-backend exec prisma migrate deploy
-          pnpm --dir oge-tutor-backend run workspace:operator -- bootstrap
+          pnpm --dir oge-tutor-backend run workspace:operator bootstrap
 
       - name: Build backend
         run: pnpm --dir oge-tutor-backend run build
