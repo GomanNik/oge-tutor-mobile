@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from
 import { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './app-error';
+import { recordHttpFailure } from '../observability/metrics';
 
 function statusToCode(status: number): string {
   if (status === 401) return 'unauthorized';
@@ -45,6 +46,7 @@ export class HttpErrorFilter implements ExceptionFilter {
     const requestId = String(request.headers['x-request-id'] || randomUUID());
 
     if (error instanceof AppError) {
+      recordHttpFailure(request.path, error.status);
       return response.status(error.status).json({
         code: error.code,
         message: error.message,
@@ -55,11 +57,13 @@ export class HttpErrorFilter implements ExceptionFilter {
 
     const prismaMapped = prismaErrorToResponse(error);
     if (prismaMapped) {
+      recordHttpFailure(request.path, prismaMapped.status);
       return response.status(prismaMapped.status).json({ ...prismaMapped, requestId });
     }
 
     if (error instanceof HttpException) {
       const status = error.getStatus();
+      recordHttpFailure(request.path, status);
       const body = error.getResponse();
       const message = typeof body === 'object' && body && 'message' in body
         ? Array.isArray((body as any).message) ? (body as any).message.join('; ') : String((body as any).message)

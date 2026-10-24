@@ -8,6 +8,7 @@ dist
 **/dist
 coverage
 **/coverage
+**/test-results
 uploads
 **/uploads
 backups

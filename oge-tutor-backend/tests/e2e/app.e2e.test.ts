@@ -6,12 +6,15 @@ import request from 'supertest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Ajv from 'ajv';
+import type { NextFunction, Request, Response } from 'express';
 import { HttpErrorFilter } from '../../src/common/http-error.filter';
 import { ACCESS_STATUS, ROLE } from '../../src/common/contracts';
 import { createValidationPipe } from '../../src/common/validation-pipe';
 import { createApiDocument } from '../../src/swagger/api-document';
 import { ensureLegacyStudent, ensureLegacyTeacher } from '../../src/workspace/legacy';
 import { AuthMailerService } from '../../src/auth/auth-mailer.service';
+import { WorkspaceInvitationsService } from '../../src/workspace/workspace-invitations.service';
 
 const databaseUrl = process.env.E2E_DATABASE_URL || '';
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -35,6 +38,7 @@ describeIfDb('AppModule e2e production flows', () => {
   let prisma: any;
   let server: any;
   let uploadDir: string;
+  const contractFailures: string[] = [];
 
   beforeAll(async () => {
     assertSafeTestDatabase(databaseUrl);
@@ -47,6 +51,7 @@ describeIfDb('AppModule e2e production flows', () => {
     process.env.APP_FRONTEND_URL = 'http://127.0.0.1:5173';
     process.env.FRONTEND_ORIGIN = 'http://127.0.0.1:5173';
     process.env.MAILER_PROVIDER = 'noop';
+    process.env.METRICS_TOKEN = 'test-metrics-token-longer-than-32-characters';
     process.env.UPLOAD_DIR = uploadDir;
 
     const { AppModule } = await import('../../src/app.module');
@@ -55,7 +60,51 @@ describeIfDb('AppModule e2e production flows', () => {
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(createValidationPipe());
     app.useGlobalFilters(new HttpErrorFilter());
+    let verifyResponse: ((method: string, path: string, status: number, body: unknown) => void) | undefined;
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const original = res.json.bind(res);
+      res.json = (body: any) => {
+        if (req.path.startsWith('/api/v2/')) {
+          try { verifyResponse?.(req.method.toLowerCase(), req.path, res.statusCode, JSON.parse(JSON.stringify(body))); }
+          catch (error) { contractFailures.push(String(error)); }
+        }
+        return original(body);
+      };
+      next();
+    });
     await app.init();
+
+    const document = createApiDocument(app);
+    const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
+    const toJsonSchema = (value: any): any => {
+      if (Array.isArray(value)) return value.map(toJsonSchema);
+      if (!value || typeof value !== 'object') return value;
+      const converted = Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'nullable')
+        .map(([key, entry]) => [key, toJsonSchema(entry)]));
+      return value.nullable ? { anyOf: [converted, { type: 'null' }] } : converted;
+    };
+    const components = toJsonSchema(document.components.schemas);
+    const validators = new Map<string, ReturnType<typeof ajv.compile>>();
+    for (const [route, pathItem] of Object.entries(document.paths)) {
+      if (!route.startsWith('/api/v2/')) continue;
+      for (const method of ['get', 'post', 'patch', 'delete'] as const) {
+        const operation = pathItem[method];
+        if (!operation) continue;
+        for (const [status, response] of Object.entries(operation.responses)) {
+          const schema = response.content?.['application/json']?.schema;
+          if (schema) validators.set(`${method} ${route} ${status}`, ajv.compile({ ...toJsonSchema(schema), components: { schemas: components } }));
+        }
+      }
+    }
+    verifyResponse = (method, pathname, status, body) => {
+      const route = Object.keys(document.paths).find(candidate => candidate.startsWith('/api/v2/')
+        && new RegExp(`^${candidate.replace(/\{[^}]+\}/g, '[^/]+')}$`).test(pathname)
+        && document.paths[candidate][method as 'get'] !== undefined);
+      const key = `${method} ${route} ${status}`;
+      const validator = validators.get(key);
+      if (!validator) throw new Error(`Missing OpenAPI response schema: ${key}`);
+      if (!validator(body)) throw new Error(`Response violates ${key}: ${ajv.errorsText(validator.errors)}`);
+    };
 
     prisma = app.get(PrismaService);
     server = app.getHttpServer();
@@ -82,6 +131,7 @@ describeIfDb('AppModule e2e production flows', () => {
   afterAll(async () => {
     await app?.close();
     if (uploadDir) fs.rmSync(uploadDir, { recursive: true, force: true });
+    expect(contractFailures).toEqual([]);
   });
 
   it('documents every HTTP route with an explicit success response schema', () => {
@@ -810,6 +860,135 @@ describeIfDb('AppModule e2e production flows', () => {
     await send().expect(429).expect(({ body }) => expect(body.code).toBe('rate_limited'));
   });
 
+  it('exports protected aggregate operational metrics', async () => {
+    await request(server).get('/internal/metrics').expect(404);
+    await request(server).get('/internal/metrics').set('Authorization', 'Bearer wrong-token').expect(404);
+    const metrics = () => request(server).get('/internal/metrics').set('Authorization', `Bearer ${process.env.METRICS_TOKEN}`);
+    const before = await metrics().expect(200);
+    expect(before.headers['content-type']).toContain('text/plain');
+    const counter = (body: string, name: string) => Number(body.match(new RegExp(`^${name} (\\d+)$`, 'm'))?.[1]);
+    const loginBefore = counter(before.text, 'oge_login_failures_total');
+    const accessBefore = counter(before.text, 'oge_access_denials_total');
+    await request(server).post('/api/v2/auth/login').send({ email: 'absent-e2e@mail.ru', password: 'wrong-password' }).expect(401);
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: 'shared-e2e@mail.ru' } });
+    const member = await prisma.workspaceMembership.findFirstOrThrow({ where: { userId: user.id, roles: { some: { role: 'student' } } } });
+    const token = (await request(server).post('/api/v2/auth/login').send({ email: user.email, password: 'workspace-pass-123' }).expect(200)).body.session.token;
+    await request(server).get(`/api/v2/workspaces/${member.workspaceId}/members`)
+      .set(auth(token)).set('X-Active-Role', 'student').expect(403);
+    const after = await metrics().expect(200);
+    expect(counter(after.text, 'oge_login_failures_total')).toBe(loginBefore + 1);
+    expect(counter(after.text, 'oge_access_denials_total')).toBe(accessBefore + 1);
+    expect(after.text).toMatch(/^oge_invitation_delivery_failures_total \d+$/m);
+    expect(after.text).toMatch(/^oge_invitation_outbox_queued \d+$/m);
+    expect(after.text).toMatch(/^oge_invitation_outbox_failed \d+$/m);
+    expect(after.text).not.toContain('mail.ru');
+    expect(after.text).not.toContain('token=');
+  });
+
+  it('isolates every workspace admin route and recovers concurrent invitations', async () => {
+    const passwordHash = await bcrypt.hash('boundary-pass-123', 4);
+    const [adminA, adminB, existing] = await Promise.all([
+      prisma.user.create({ data: { email: 'boundary-a-e2e@mail.ru', displayName: 'Boundary A', passwordHash } }),
+      prisma.user.create({ data: { email: 'boundary-b-e2e@mail.ru', displayName: 'Boundary B', passwordHash } }),
+      prisma.user.create({ data: { email: 'boundary-existing-e2e@mail.ru', displayName: 'Existing Member', passwordHash } }),
+    ]);
+    const [a, b] = await Promise.all([
+      prisma.workspace.create({ data: { name: 'Boundary A', slug: 'boundary-a-e2e' } }),
+      prisma.workspace.create({ data: { name: 'Boundary B', slug: 'boundary-b-e2e' } }),
+    ]);
+    await Promise.all([
+      prisma.workspaceMembership.create({ data: { workspaceId: a.id, userId: adminA.id, roles: { create: [{ role: 'admin' }] } } }),
+      prisma.workspaceMembership.create({ data: { workspaceId: b.id, userId: adminB.id, roles: { create: [{ role: 'admin' }] } } }),
+    ]);
+    const existingMember = await prisma.workspaceMembership.create({ data: {
+      workspaceId: a.id, userId: existing.id, roles: { create: [{ role: 'student' }] },
+    } });
+    const foreignMember = await prisma.workspaceMembership.create({ data: {
+      workspaceId: b.id, userId: existing.id, roles: { create: [{ role: 'student' }] },
+    } });
+    const login = async (email: string) => (await request(server).post('/api/v2/auth/login')
+      .send({ email, password: 'boundary-pass-123' }).expect(200)).body.session.token;
+    const [tokenA, tokenB, existingToken] = await Promise.all([login(adminA.email), login(adminB.email), login(existing.email)]);
+    const headersA = { ...auth(tokenA), 'X-Active-Role': 'admin' };
+    const headersB = { ...auth(tokenB), 'X-Active-Role': 'admin' };
+    const prefixA = `/api/v2/workspaces/${a.id}`;
+    const prefixB = `/api/v2/workspaces/${b.id}`;
+    for (const suffix of ['', '/members', '/invitations', '/audit-events']) {
+      await request(server).get(`${prefixB}${suffix}`).set(headersA).expect(404);
+    }
+    await request(server).get(`${prefixA}/members/${foreignMember.id}`).set(headersA).expect(404);
+    await request(server).patch(`${prefixA}/members/${foreignMember.id}`).set(headersA).set('If-Match', '0')
+      .send({ displayNameOverride: 'Foreign Name' }).expect(404);
+    await request(server).post(`${prefixA}/members/${foreignMember.id}/roles`).set(headersA).set('Idempotency-Key', 'foreign-grant')
+      .send({ role: 'teacher' }).expect(404);
+    for (const suffix of ['/roles/student/revoke', '/suspend', '/resume']) {
+      await request(server).post(`${prefixA}/members/${foreignMember.id}${suffix}`).set(headersA).set('If-Match', '0')
+        .send({ reason: 'Foreign member access attempt' }).expect(404);
+    }
+
+    const mailer = app.get(AuthMailerService);
+    const invitationService = app.get(WorkspaceInvitationsService);
+    let delivered = '';
+    const send = vi.spyOn(mailer, 'sendWorkspaceInvitation').mockImplementation(async input => {
+      delivered = input.link;
+      return { status: 'sent', provider: 'smtp' };
+    });
+    const invite = (workspaceId: string, key: string, email: string, roles: string[]) => request(server)
+      .post(`/api/v2/workspaces/${workspaceId}/invitations`).set(workspaceId === a.id ? headersA : headersB)
+      .set('Idempotency-Key', key).send({ email, roles });
+    const foreignInvite = await invite(b.id, 'foreign-invite', 'foreign-invite-e2e@mail.ru', ['student']).expect(200);
+    for (const suffix of ['/resend', '/revoke']) {
+      await request(server).post(`${prefixA}/invitations/${foreignInvite.body.item.id}${suffix}`).set(headersA)
+        .set('If-Match', '0').send({}).expect(404);
+    }
+
+    const activeInvite = await invite(a.id, 'active-existing', existing.email, ['teacher']).expect(200);
+    const activeToken = new URL(delivered).searchParams.get('token');
+    const [first, second] = await Promise.all([
+      request(server).post('/api/v2/invitations/accept-existing').set(auth(existingToken)).send({ token: activeToken }),
+      request(server).post('/api/v2/invitations/accept-existing').set(auth(existingToken)).send({ token: activeToken }),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    expect(await prisma.workspaceMembership.count({ where: { workspaceId: a.id, userId: existing.id } })).toBe(1);
+    expect(await prisma.workspaceRoleGrant.count({ where: { membershipId: existingMember.id, role: 'teacher' } })).toBe(1);
+    expect((await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: activeInvite.body.item.id } })).status).toBe('accepted');
+
+    await prisma.workspaceMembership.update({ where: { id: foreignMember.id }, data: { status: 'suspended' } });
+    const suspendedInvite = await invite(b.id, 'suspended-existing', existing.email, ['teacher']).expect(200);
+    const suspendedToken = new URL(delivered).searchParams.get('token');
+    await request(server).post('/api/v2/invitations/accept-existing').set(auth(existingToken))
+      .send({ token: suspendedToken }).expect(409);
+    expect((await prisma.workspaceMembership.findUniqueOrThrow({ where: { id: foreignMember.id } })).status).toBe('suspended');
+    expect((await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: suspendedInvite.body.item.id } })).status).toBe('pending');
+
+    const newInvite = await invite(a.id, 'new-concurrent', 'boundary-new-e2e@mail.ru', ['student']).expect(200);
+    const newToken = new URL(delivered).searchParams.get('token');
+    const accepted = await Promise.all([
+      request(server).post('/api/v2/invitations/accept-new').send({ token: newToken, displayName: 'New Member', password: 'new-member-pass' }),
+      request(server).post('/api/v2/invitations/accept-new').send({ token: newToken, displayName: 'New Member', password: 'new-member-pass' }),
+    ]);
+    expect(accepted.map(result => result.status).sort()).toEqual([200, 409]);
+    expect(await prisma.user.count({ where: { email: 'boundary-new-e2e@mail.ru' } })).toBe(1);
+    expect((await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: newInvite.body.item.id } })).status).toBe('accepted');
+
+    const pausedDelivery = vi.spyOn(invitationService, 'deliverOne').mockResolvedValue(undefined);
+    const pending = await invite(a.id, 'after-commit', 'after-commit-e2e@mail.ru', ['student']).expect(200);
+    pausedDelivery.mockRestore();
+    const outbox = await prisma.workspaceEmailOutbox.findFirstOrThrow({ where: { invitationId: pending.body.item.id } });
+    expect(outbox.sentAt).toBeNull();
+    expect(outbox.encryptedLink).toBeTruthy();
+    await invitationService.flushPending();
+    expect((await prisma.workspaceEmailOutbox.findUniqueOrThrow({ where: { id: outbox.id } })).encryptedLink).toBeNull();
+    expect((await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: pending.body.item.id } })).deliveryStatus).toBe('sent');
+    expect(delivered).toContain('token=');
+
+    await request(server).post(`${prefixA}/invitations`).set(headersA).set('Idempotency-Key', 'invalid-extra')
+      .send({ email: 'extra-e2e@mail.ru', roles: ['student'], isAdmin: true }).expect(400);
+    await request(server).patch(`${prefixA}/members/${existingMember.id}`).set(headersA).set('If-Match', '1')
+      .send({ displayNameOverride: 'Safe Name', email: 'hijack@mail.ru' }).expect(400);
+    send.mockRestore();
+  });
+
   it('manages isolated multi-exam catalogs with immutable published versions', async () => {
     const passwordHash = await bcrypt.hash('catalog-pass-123', 4);
     const [adminA, adminB, globalEditor] = await Promise.all([
@@ -843,6 +1022,8 @@ describeIfDb('AppModule e2e production flows', () => {
       .expect(({ body }) => expect(body.item.id).toBe(localSubject.body.item.id));
     await create('/api/v2/subjects', headersA, 'local-physics', { workspaceId: a.id, code: 'chemistry', name: 'Химия' }).expect(409);
     await request(server).get(`/api/v2/subjects/${localSubject.body.item.id}`).set(headersB).expect(404);
+    await request(server).patch(`/api/v2/subjects/${localSubject.body.item.id}`).set(headersB).set('If-Match', '0').send({ name: 'Чужой предмет' }).expect(404);
+    await request(server).post(`/api/v2/subjects/${localSubject.body.item.id}/archive`).set(headersB).set('If-Match', '0').send({}).expect(404);
     await request(server).get(`/api/v2/subjects?workspaceId=${b.id}`).set(headersB).expect(200)
       .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).not.toContain(localSubject.body.item.id));
     await request(server).get(`/api/v2/subjects?workspaceId=${a.id}`).set(headersA).expect(200)
@@ -850,16 +1031,22 @@ describeIfDb('AppModule e2e production flows', () => {
 
     const programBody = { workspaceId: a.id, subjectId: globalSubject.body.item.id, examType: 'ege', variant: 'base', code: 'ege-math-base-e2e', name: 'ЕГЭ · математика · база' };
     const program = await create('/api/v2/programs', headersA, 'program-base', programBody).expect(200);
+    await request(server).patch(`/api/v2/programs/${program.body.item.id}`).set(headersB).set('If-Match', '0').send({ name: 'Чужая программа' }).expect(404);
+    await request(server).post(`/api/v2/programs/${program.body.item.id}/archive`).set(headersB).set('If-Match', '0').send({}).expect(404);
     await create('/api/v2/programs', headersB, 'cross-scope', { ...programBody, workspaceId: b.id, subjectId: localSubject.body.item.id }).expect(422);
     await create('/api/v2/programs', headersA, 'program-profile', { ...programBody, variant: 'profile', code: 'ege-math-profile-e2e', name: 'ЕГЭ · математика · профиль' }).expect(200);
     await create('/api/v2/programs', headersA, 'program-oge', { ...programBody, examType: 'oge', variant: 'general', code: 'oge-math-e2e', name: 'ОГЭ · математика' }).expect(200);
     const version = await create(`/api/v2/programs/${program.body.item.id}/versions`, headersA, 'version-one', { period: '2027', revisionNumber: 1, sourceUrl: 'https://example.org/catalog-2027' }).expect(200);
     const versionId = version.body.item.id;
+    await create(`/api/v2/programs/${program.body.item.id}/versions`, headersB, 'foreign-version', { period: '2029', revisionNumber: 1 }).expect(404);
+    await request(server).patch(`/api/v2/program-versions/${versionId}`).set(headersB).set('If-Match', '0').send({ notes: 'Чужая правка' }).expect(404);
+    await request(server).post(`/api/v2/program-versions/${versionId}/publish`).set(headersB).set('If-Match', '0').send({}).expect(404);
     await request(server).get(`/api/v2/program-versions/${versionId}`).set(headersA).expect(200)
       .expect(({ body }) => expect(body.item.program.id).toBe(program.body.item.id));
     await request(server).post(`/api/v2/program-versions/${versionId}/publish`).set(headersA).set('If-Match', '0').send({}).expect(422);
     const taskBody = { code: 'A-1', title: 'Первое задание', topics: ['Алгебра'], position: 1, kind: 'short_answer', maxScore: 2,
       criteria: [{ code: 'score-1', title: 'Первый балл', maxScore: 1 }, { code: 'score-2', title: 'Второй балл', maxScore: 1 }] };
+    await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersB).set('If-Match', '0').send(taskBody).expect(404);
     await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).set('If-Match', '0')
       .send({ ...taskBody, criteria: [taskBody.criteria[0]] }).expect(422);
     const task = await request(server).post(`/api/v2/program-versions/${versionId}/tasks`).set(headersA).set('If-Match', '0').send(taskBody).expect(200);
@@ -879,6 +1066,8 @@ describeIfDb('AppModule e2e production flows', () => {
       .send({ ...taskBody, code: 'X-7', title: 'Переработанное задание' }).expect(200);
     await request(server).post(`/api/v2/program-versions/${nextVersion.body.item.id}/publish`).set(headersA).set('If-Match', '1').send({}).expect(200);
     const mapping = await create('/api/v2/task-mappings', headersA, 'map-tasks', { fromTaskId: task.body.item.id, toTaskId: nextTask.body.item.id, reason: 'Подтверждена эквивалентность заданий двух периодов.' }).expect(200);
+    await create('/api/v2/task-mappings', headersB, 'foreign-mapping', { fromTaskId: task.body.item.id, toTaskId: nextTask.body.item.id, reason: 'Недоступное сопоставление заданий.' }).expect(404);
+    await request(server).post(`/api/v2/task-mappings/${mapping.body.item.id}/revoke`).set(headersB).set('If-Match', '0').send({ reason: 'Чужой отзыв сопоставления.' }).expect(404);
     await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}`).set(headersA).expect(200)
       .expect(({ body }) => expect(body.total).toBe(1));
     await request(server).get(`/api/v2/task-mappings?fromVersionId=${versionId}&toVersionId=${nextVersion.body.item.id}`).set(headersB).expect(404);
