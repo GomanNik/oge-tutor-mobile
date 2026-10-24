@@ -20,6 +20,10 @@ async function main() {
   await prisma.workspaceInvitationRole.deleteMany();
   await prisma.workspaceInvitation.deleteMany();
   await prisma.workspaceAuditEvent.deleteMany();
+  await prisma.legacyCourseMapping.deleteMany();
+  await prisma.enrollment.deleteMany();
+  await prisma.courseTeacher.deleteMany();
+  await prisma.course.deleteMany();
   await prisma.workspaceRoleGrant.deleteMany();
   await prisma.workspaceMembership.deleteMany();
   await prisma.legacyWorkspaceMapping.deleteMany();

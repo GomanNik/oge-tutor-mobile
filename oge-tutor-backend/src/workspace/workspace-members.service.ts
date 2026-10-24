@@ -78,6 +78,20 @@ export class WorkspaceMembersService {
     if (count <= 1) invalid('last_admin', 'Нельзя снять последнего администратора.');
   }
 
+  private async assertNotSoleCourseLead(tx: Prisma.TransactionClient, ctx: WorkspaceContext, memberId: string) {
+    const affected = await tx.$queryRaw<{ id: string }[]>`
+      SELECT c.id FROM "Course" c JOIN "CourseTeacher" ct ON ct."courseId" = c.id
+      WHERE c."workspaceId" = ${ctx.workspaceId} AND c.status IN ('active', 'paused')
+        AND ct."membershipId" = ${memberId} AND ct.role = 'lead' AND ct.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM "CourseTeacher" other
+          JOIN "WorkspaceMembership" m ON m.id = other."membershipId"
+          JOIN "WorkspaceRoleGrant" g ON g."membershipId" = m.id AND g.role = 'teacher' AND g."revokedAt" IS NULL
+          WHERE other."courseId" = c.id AND other.id <> ct.id AND other.role = 'lead' AND other.status = 'active' AND m.status = 'active'
+        ) LIMIT 1`;
+    if (affected.length) invalid('last_course_lead', 'Сначала назначьте другого ведущего действующего курса.');
+  }
+
   private async audit(tx: Prisma.TransactionClient, ctx: WorkspaceContext, action: string, targetId: string, changes: Prisma.InputJsonValue, reason?: string) {
     await tx.workspaceAuditEvent.create({
       data: { workspaceId: ctx.workspaceId, actorUserId: ctx.userId, targetType: 'membership', targetId, action, changes, reason, requestId: ctx.requestId },
@@ -180,6 +194,7 @@ export class WorkspaceMembersService {
       const grant = row.roles.find(item => item.role === role && !item.revokedAt);
       if (!grant) invalid('invalid_state', 'Роль уже отозвана.');
       if (role === 'admin') await this.assertNotLastAdmin(tx, ctx, row);
+      if (role === 'teacher' && row.status === 'active') await this.assertNotSoleCourseLead(tx, ctx, memberId);
       await tx.workspaceRoleGrant.update({ where: { id: grant!.id }, data: { revokedAt: new Date(), revokedById: ctx.userId } });
       const updated = await tx.workspaceMembership.update({ where: { id: memberId }, data: { revision: { increment: 1 } }, include: { user: true, roles: true } });
       await this.audit(tx, ctx, 'member.role.revoked', memberId, { role }, reason);
@@ -193,7 +208,10 @@ export class WorkspaceMembersService {
       const row = await this.targetInTx(tx, ctx, memberId);
       if (row.revision !== revision) invalid('revision_mismatch', 'Участник изменился. Обновите страницу.', 412);
       if ((row.status === 'suspended') === suspend) invalid('invalid_state', 'Состояние уже установлено.');
-      if (suspend) await this.assertNotLastAdmin(tx, ctx, row);
+      if (suspend) {
+        await this.assertNotLastAdmin(tx, ctx, row);
+        if (row.roles.some(grant => grant.role === 'teacher' && !grant.revokedAt)) await this.assertNotSoleCourseLead(tx, ctx, memberId);
+      }
       const updated = await tx.workspaceMembership.update({
         where: { id: memberId },
         data: { status: suspend ? 'suspended' : 'active', suspendedAt: suspend ? new Date() : null, revision: { increment: 1 } },

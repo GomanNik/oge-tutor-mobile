@@ -13,13 +13,14 @@ import * as Students from '../students/students.dto';
 import * as Teacher from '../teacher/teacher.dto';
 import * as Workspace from '../workspace/workspace.dto';
 import * as ProgramCatalog from '../program-catalog/program-catalog.dto';
+import * as Courses from '../courses/courses.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace), ...Object.values(ProgramCatalog),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses),
 ];
 const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
@@ -117,6 +118,25 @@ Object.assign(contracts, {
   'post /api/v2/task-mappings': { request: 'CreateTaskMappingDto', response: 'V2TaskMappingMutation' },
   'post /api/v2/task-mappings/{}/revoke': { request: 'RevokeTaskMappingDto', response: 'V2TaskMappingMutation' },
 } satisfies OperationContracts);
+Object.assign(contracts, {
+  'get /api/v2/workspaces/{}/courses': { response: 'V2CoursePage' },
+  'post /api/v2/workspaces/{}/courses': { request: 'CreateCourseDto', response: 'V2CourseMutation' },
+  'get /api/v2/workspaces/{}/courses/{}': { response: 'V2CourseDetail' },
+  'patch /api/v2/workspaces/{}/courses/{}': { request: 'UpdateCourseDto', response: 'V2CourseMutation' },
+  'post /api/v2/workspaces/{}/courses/{}/activate': { response: 'V2CourseMutation' },
+  'post /api/v2/workspaces/{}/courses/{}/pause': { response: 'V2CourseMutation' },
+  'post /api/v2/workspaces/{}/courses/{}/complete': { response: 'V2CourseMutation' },
+  'post /api/v2/workspaces/{}/courses/{}/archive': { response: 'V2CourseMutation' },
+  'get /api/v2/workspaces/{}/courses/{}/teachers': { response: 'V2CourseTeacherList' },
+  'post /api/v2/workspaces/{}/courses/{}/teachers': { request: 'AddCourseTeacherDto', response: 'V2CourseTeacherMutation' },
+  'patch /api/v2/workspaces/{}/courses/{}/teachers/{}': { request: 'UpdateCourseTeacherDto', response: 'V2CourseTeacherMutation' },
+  'get /api/v2/workspaces/{}/courses/{}/enrollments': { response: 'V2EnrollmentList' },
+  'post /api/v2/workspaces/{}/courses/{}/enrollments': { request: 'CreateEnrollmentDto', response: 'V2EnrollmentMutation' },
+  'get /api/v2/workspaces/{}/courses/{}/enrollments/{}': { response: 'V2EnrollmentDetail' },
+  'patch /api/v2/workspaces/{}/courses/{}/enrollments/{}': { request: 'UpdateEnrollmentDto', response: 'V2EnrollmentMutation' },
+  'post /api/v2/workspaces/{}/enrollment-batches/preview': { request: 'EnrollmentBatchDto', response: 'V2EnrollmentBatchPreview' },
+  'post /api/v2/workspaces/{}/enrollment-batches': { request: 'EnrollmentBatchDto', response: 'V2EnrollmentBatchResult' },
+} satisfies OperationContracts);
 for (const [key, request] of Object.entries(mutationRequests)) {
   contracts[key] = { request, response: key.endsWith('/security/password') ? 'OkResponse' : 'MutationResponse', multipart: key.endsWith('/submissions') };
 }
@@ -161,10 +181,12 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
         operation.parameters.push({ name: 'x-request-id', in: 'header', required: false, schema: { type: 'string' }, description: 'Optional correlation identifier, echoed in error responses.' });
       }
       if (path.startsWith('/api/v2/') && method !== 'get') {
-        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend|archive|publish)$/.test(path)
+        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete)$/.test(path)
           || /\/program-versions\/[^/]+\/tasks(?:\/[^/]+)?$/.test(path) || /\/program-versions\/[^/]+\/scoring-rule$/.test(path);
         const isIdempotentMutation = /\/invitations$|\/roles$/.test(path) || /\/api\/v2\/(subjects|programs|task-mappings)$/.test(path)
-          || /\/api\/v2\/programs\/[^/]+\/versions$/.test(path);
+          || /\/api\/v2\/programs\/[^/]+\/versions$/.test(path)
+          || /\/api\/v2\/workspaces\/[^/]+\/courses(?:\/[^/]+\/(?:teachers|enrollments))?$/.test(path)
+          || /\/api\/v2\/workspaces\/[^/]+\/enrollment-batches$/.test(path);
         if (isRevisionMutation) operation.parameters.push({ name: 'If-Match', in: 'header', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Expected resource revision.' });
         if (isIdempotentMutation) operation.parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
       }
@@ -202,7 +224,7 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
       if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
-      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|tasks|scoring-rule)$/.test(path))) {
+      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete|tasks|scoring-rule)$/.test(path))) {
         errors['412'] = 'Revision mismatch.';
         errors['428'] = 'If-Match header is required.';
       }

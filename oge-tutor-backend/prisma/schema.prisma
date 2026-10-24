@@ -50,6 +50,38 @@ enum WorkspaceStatus {
   archived
 }
 
+enum CourseFormat {
+  individual
+  group
+}
+
+enum CourseStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+}
+
+enum CourseTeacherRole {
+  lead
+  assistant
+  substitute
+}
+
+enum CourseTeacherStatus {
+  active
+  ended
+}
+
+enum EnrollmentStatus {
+  invited
+  active
+  paused
+  completed
+  withdrawn
+}
+
 enum MembershipStatus {
   active
   suspended
@@ -182,6 +214,7 @@ model User {
   catalogAuditEvents CatalogAuditEvent[]
   createdTaskMappings TaskMapping[] @relation("MappingCreator")
   revokedTaskMappings TaskMapping[] @relation("MappingRevoker")
+  createdEnrollments Enrollment[]
 
   @@index([role])
 }
@@ -249,6 +282,7 @@ model Workspace {
   catalogSubjects Subject[]
   catalogPrograms ExamProgram[]
   catalogAuditEvents CatalogAuditEvent[]
+  courses Course[]
 }
 
 model CatalogGrant {
@@ -312,6 +346,7 @@ model ProgramVersion {
   updatedAt DateTime @updatedAt
   tasks TaskDefinition[]
   scoringRule ScoringRule?
+  courses Course[]
 
   @@unique([programId, period, revisionNumber])
   @@index([programId, status, period, id])
@@ -401,8 +436,11 @@ model WorkspaceMembership {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   roles               WorkspaceRoleGrant[]
+  courseTeachers      CourseTeacher[]
+  enrollments         Enrollment[]
 
   @@unique([workspaceId, userId])
+  @@unique([id, workspaceId])
   @@index([workspaceId, status, id])
   @@index([workspaceId, createdAt, id])
   @@index([userId, status])
@@ -531,10 +569,87 @@ model StudentProfile {
   historyEvents  ProgressHistory[]
   submissions    HomeworkSubmission[]
   notifications  Notification[]
+  legacyCourseMapping LegacyCourseMapping?
 
   @@index([teacherId])
   @@index([teacherId, access])
   @@index([access])
+}
+
+model Course {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  programVersionId String
+  programVersion ProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  title String
+  defaultFormat CourseFormat
+  capacity Int
+  startsOn DateTime @db.Date
+  endsOn DateTime? @db.Date
+  timezone String
+  status CourseStatus @default(draft)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  teachers CourseTeacher[]
+  enrollments Enrollment[]
+  legacyMapping LegacyCourseMapping?
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status, createdAt, id])
+  @@index([workspaceId, programVersionId, status])
+}
+
+model CourseTeacher {
+  id String @id @default(cuid())
+  workspaceId String
+  courseId String
+  course Course @relation(fields: [courseId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  membershipId String
+  membership WorkspaceMembership @relation(fields: [membershipId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  role CourseTeacherRole
+  status CourseTeacherStatus @default(active)
+  startsOn DateTime @db.Date
+  endsOn DateTime? @db.Date
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId, status, role])
+  @@index([membershipId, status])
+}
+
+model Enrollment {
+  id String @id @default(cuid())
+  workspaceId String
+  courseId String
+  course Course @relation(fields: [courseId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  membershipId String
+  membership WorkspaceMembership @relation(fields: [membershipId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  status EnrollmentStatus @default(invited)
+  startsOn DateTime? @db.Date
+  endsOn DateTime? @db.Date
+  goal String @default("")
+  note String @default("")
+  createdByUserId String?
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  legacyMapping LegacyCourseMapping?
+
+  @@index([courseId, status, createdAt, id])
+  @@index([membershipId, status])
+}
+
+model LegacyCourseMapping {
+  studentProfileId String @id
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+  courseId String @unique
+  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  enrollmentId String @unique
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
 }
 
 model Lesson {
