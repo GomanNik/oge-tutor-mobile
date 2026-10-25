@@ -13,7 +13,7 @@ function lessonService(prisma: any) {
 }
 
 function withTransaction(prisma: any) {
-  prisma.$queryRaw = vi.fn(async () => [{ id: 't-1' }]);
+  prisma.$queryRaw = vi.fn(async () => [{ id: 'u-student' }, { id: 'u-teacher' }]);
   prisma.$transaction = vi.fn(async (callback) => callback(prisma));
   return prisma;
 }
@@ -32,14 +32,18 @@ describe('lesson lifecycle guards', () => {
   it('checks conflicts only against active lessons, so completed lessons do not block new schedule', async () => {
     let conflictWhere: any;
     const prisma = withTransaction({
-      studentProfile: { findFirst: vi.fn(async () => ({ id: 's-1' })) },
+      studentProfile: { findFirst: vi.fn(async () => ({ id: 's-1' })), findUniqueOrThrow: vi.fn(async () => ({ userId: 'u-student' })) },
+      teacherProfile: { findUniqueOrThrow: vi.fn(async () => ({ userId: 'u-teacher' })) },
+      legacyCourseMapping: { findUnique: vi.fn(async () => ({ courseId: 'course-1', enrollmentId: 'enrollment-1' })) },
       lesson: {
-        findFirst: vi.fn(async ({ where }) => {
+        findMany: vi.fn(async ({ where }) => {
           conflictWhere = where;
-          return null;
+          return [];
         }),
         create: vi.fn(async ({ data }) => ({ id: 'l-1', ...data })),
       },
+      lessonTeacher: { create: vi.fn(async () => ({})) },
+      lessonParticipant: { create: vi.fn(async () => ({})) },
     });
     await lessonService(prisma).create(teacher, {
       studentId: 's-1',
@@ -48,7 +52,9 @@ describe('lesson lifecycle guards', () => {
       endAt: future(120),
     });
     expect(conflictWhere.status).toEqual({ in: [LESSON_STATUS.PLANNED, LESSON_STATUS.RESCHEDULED] });
-    expect(conflictWhere.teacherId).toBe('t-1');
+    expect(conflictWhere.OR).toHaveLength(2);
+    expect(prisma.lessonTeacher.create).toHaveBeenCalledOnce();
+    expect(prisma.lessonParticipant.create).toHaveBeenCalledOnce();
   });
 
   it('rejects completing canceled and already completed lessons', async () => {

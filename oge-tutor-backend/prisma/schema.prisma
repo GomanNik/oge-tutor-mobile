@@ -125,6 +125,19 @@ enum LessonSource {
   import
 }
 
+enum LessonAttendance {
+  unknown
+  present
+  absent
+  excused
+}
+
+enum LessonResponseStatus {
+  invited
+  accepted
+  declined
+}
+
 enum HomeworkStatus {
   assigned
   submitted
@@ -215,6 +228,7 @@ model User {
   createdTaskMappings TaskMapping[] @relation("MappingCreator")
   revokedTaskMappings TaskMapping[] @relation("MappingRevoker")
   createdEnrollments Enrollment[]
+  lessonAttendanceMarks LessonParticipant[] @relation("LessonAttendanceMarker")
 
   @@index([role])
 }
@@ -594,6 +608,7 @@ model Course {
   updatedAt DateTime @updatedAt
   teachers CourseTeacher[]
   enrollments Enrollment[]
+  lessons Lesson[]
   legacyMapping LegacyCourseMapping?
 
   @@unique([id, workspaceId])
@@ -615,7 +630,9 @@ model CourseTeacher {
   revision Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  lessonTeachers LessonTeacher[]
 
+  @@unique([id, courseId])
   @@index([courseId, status, role])
   @@index([membershipId, status])
 }
@@ -638,7 +655,9 @@ model Enrollment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   legacyMapping LegacyCourseMapping?
+  lessonParticipants LessonParticipant[]
 
+  @@unique([id, courseId])
   @@index([courseId, status, createdAt, id])
   @@index([membershipId, status])
 }
@@ -654,10 +673,12 @@ model LegacyCourseMapping {
 
 model Lesson {
   id                String         @id @default(cuid())
-  teacherId         String
-  teacher           TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  studentId         String
-  student           StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseId          String
+  course            Course         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  teacherId         String?
+  teacher           TeacherProfile? @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  studentId         String?
+  student           StudentProfile? @relation(fields: [studentId], references: [id], onDelete: Restrict)
   topic             String
   focusTaskNumbers  Int[]          @default([])
   startAt           DateTime
@@ -665,6 +686,8 @@ model Lesson {
   timezone          String
   durationMinutes   Int
   status            LessonStatus   @default(planned)
+  format            CourseFormat   @default(individual)
+  revision          Int            @default(0)
   source            LessonSource   @default(manual)
   completedAt       DateTime?
   completionComment String         @default("")
@@ -674,12 +697,47 @@ model Lesson {
   updatedAt         DateTime       @updatedAt
   progressEvents    ProgressHistory[]
   notifications     Notification[]
+  lessonTeachers    LessonTeacher[]
+  participants      LessonParticipant[]
 
+  @@unique([id, courseId])
+  @@index([courseId, status, startAt, id])
   @@index([teacherId])
   @@index([studentId])
   @@index([startAt])
   @@index([teacherId, status, startAt])
   @@index([studentId, status, startAt])
+}
+
+model LessonTeacher {
+  id String @id @default(cuid())
+  lessonId String
+  courseId String
+  lesson Lesson @relation(fields: [lessonId, courseId], references: [id, courseId], onDelete: Restrict)
+  courseTeacherId String
+  courseTeacher CourseTeacher @relation(fields: [courseTeacherId, courseId], references: [id, courseId], onDelete: Restrict)
+  createdAt DateTime @default(now())
+
+  @@unique([lessonId, courseTeacherId])
+  @@index([courseTeacherId])
+}
+
+model LessonParticipant {
+  id String @id @default(cuid())
+  lessonId String
+  courseId String
+  lesson Lesson @relation(fields: [lessonId, courseId], references: [id, courseId], onDelete: Restrict)
+  enrollmentId String
+  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Restrict)
+  responseStatus LessonResponseStatus @default(invited)
+  attendance LessonAttendance @default(unknown)
+  attendanceMarkedAt DateTime?
+  attendanceMarkedByUserId String?
+  attendanceMarkedBy User? @relation("LessonAttendanceMarker", fields: [attendanceMarkedByUserId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+
+  @@unique([lessonId, enrollmentId])
+  @@index([enrollmentId])
 }
 
 model Homework {

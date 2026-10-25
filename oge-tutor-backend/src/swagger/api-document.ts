@@ -14,13 +14,14 @@ import * as Teacher from '../teacher/teacher.dto';
 import * as Workspace from '../workspace/workspace.dto';
 import * as ProgramCatalog from '../program-catalog/program-catalog.dto';
 import * as Courses from '../courses/courses.dto';
+import * as CourseLessons from '../course-lessons/course-lessons.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons),
 ];
 const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
@@ -137,6 +138,16 @@ Object.assign(contracts, {
   'post /api/v2/workspaces/{}/enrollment-batches/preview': { request: 'EnrollmentBatchDto', response: 'V2EnrollmentBatchPreview' },
   'post /api/v2/workspaces/{}/enrollment-batches': { request: 'EnrollmentBatchDto', response: 'V2EnrollmentBatchResult' },
 } satisfies OperationContracts);
+Object.assign(contracts, {
+  'get /api/v2/workspaces/{}/lessons': { response: 'V2LessonPage' },
+  'post /api/v2/workspaces/{}/lessons/preview': { request: 'CreateCourseLessonDto', response: 'V2LessonPreview' },
+  'post /api/v2/workspaces/{}/lessons': { request: 'CreateCourseLessonDto', response: 'V2LessonMutation' },
+  'get /api/v2/workspaces/{}/lessons/{}': { response: 'V2LessonDetail' },
+  'patch /api/v2/workspaces/{}/lessons/{}': { request: 'UpdateCourseLessonDto', response: 'V2LessonMutation' },
+  'post /api/v2/workspaces/{}/lessons/{}/cancel': { request: 'CancelCourseLessonDto', response: 'V2LessonMutation' },
+  'post /api/v2/workspaces/{}/lessons/{}/complete': { request: 'CompleteCourseLessonDto', response: 'V2LessonMutation' },
+  'post /api/v2/workspaces/{}/lessons/{}/attendance-corrections': { request: 'CorrectLessonAttendanceDto', response: 'V2LessonMutation' },
+} satisfies OperationContracts);
 for (const [key, request] of Object.entries(mutationRequests)) {
   contracts[key] = { request, response: key.endsWith('/security/password') ? 'OkResponse' : 'MutationResponse', multipart: key.endsWith('/submissions') };
 }
@@ -224,7 +235,7 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
       if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
-      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete|tasks|scoring-rule)$/.test(path))) {
+      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete|cancel|attendance-corrections|tasks|scoring-rule)$/.test(path))) {
         errors['412'] = 'Revision mismatch.';
         errors['428'] = 'If-Match header is required.';
       }

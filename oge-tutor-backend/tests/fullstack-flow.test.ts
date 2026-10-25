@@ -95,6 +95,10 @@ class MemoryPrisma {
     findUnique: vi.fn(async () => ({ workspaceId: 'legacy-test', workspace: { status: 'active' } })),
   };
 
+  legacyCourseMapping = {
+    findUnique: vi.fn(async ({ where }) => ({ courseId: `legacy-course-${where.studentProfileId}`, enrollmentId: `legacy-enrollment-${where.studentProfileId}` })),
+  };
+
   workspaceMembership = {
     findUnique: vi.fn(async ({ where }) => {
       const user = this.users.find((item) => item.id === where.workspaceId_userId.userId);
@@ -162,6 +166,11 @@ class MemoryPrisma {
       const row = this.students.find((student) => student.id === where.id || student.userId === where.userId);
       if (!row) return null;
       return include ? this.withStudentIncludes(row) : row;
+    }),
+    findUniqueOrThrow: vi.fn(async ({ where }) => {
+      const row = await this.studentProfile.findUnique({ where });
+      if (!row) throw new Error('not found');
+      return row;
     }),
     findMany: vi.fn(async ({ where }) => this.students
       .filter((student) => !where?.teacherId || student.teacherId === where.teacherId)
@@ -273,6 +282,9 @@ class MemoryPrisma {
     }),
   };
 
+  lessonTeacher = { create: vi.fn(async () => ({})) };
+  lessonParticipant = { create: vi.fn(async () => ({})) };
+
   homework = {
     findFirst: vi.fn(async ({ where }) => this.homeworks.find((homework) => (
       (!where.id || homework.id === where.id)
@@ -348,7 +360,10 @@ class MemoryPrisma {
     updateMany: vi.fn(async () => ({ count: 0 })),
   };
 
-  $queryRaw = vi.fn(async () => [{ id: 't-1' }]);
+  $queryRaw = vi.fn(async () => [
+    ...this.teachers.map((teacher) => ({ id: teacher.userId })),
+    ...this.students.map((student) => ({ id: student.userId })),
+  ]);
   $transaction = vi.fn(async (callback) => callback(this));
 }
 

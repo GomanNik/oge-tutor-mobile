@@ -12,6 +12,8 @@ async function main() {
   await prisma.studentTaskProgress.deleteMany();
   await prisma.homeworkSubmission.deleteMany();
   await prisma.homework.deleteMany();
+  await prisma.lessonParticipant.deleteMany();
+  await prisma.lessonTeacher.deleteMany();
   await prisma.lesson.deleteMany();
   await prisma.materialAttachment.deleteMany();
   await prisma.materialTopic.deleteMany();
@@ -127,6 +129,7 @@ async function main() {
 
   await prisma.lesson.create({
     data: {
+      courseId: `legacy-course-${ivan.id}`,
       teacherId: teacher.id,
       studentId: ivan.id,
       topic: 'Уравнения и преобразования',
@@ -138,6 +141,8 @@ async function main() {
       status: 'planned',
       source: 'manual',
       materials: [],
+      lessonTeachers: { create: [{ courseTeacherId: `legacy-course-teacher-${ivan.id}` }] },
+      participants: { create: [{ enrollmentId: `legacy-enrollment-${ivan.id}`, responseStatus: 'accepted' }] },
     },
   });
 

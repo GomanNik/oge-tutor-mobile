@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import LessonsPanel from './LessonsPanel.jsx';
 
 const STATUS = { draft: 'Черновик', active: 'Активен', paused: 'Приостановлен', completed: 'Завершён', archived: 'В архиве' };
 const ENROLLMENT_STATUS = { invited: 'Приглашён', active: 'Учится', paused: 'Пауза', completed: 'Завершил', withdrawn: 'Выбыл' };
@@ -283,6 +284,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
         <button type="submit" disabled={busy}>Сохранить</button><button type="button" onClick={() => setEditingEnrollment(null)}>Отмена</button>
       </form>}
     </section>
+    <LessonsPanel api={api} context={context} course={course} onAccessError={onAccessError} />
   </div>;
 }
 

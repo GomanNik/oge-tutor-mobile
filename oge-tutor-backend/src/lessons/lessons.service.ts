@@ -6,6 +6,7 @@ import { LESSON_SOURCE, LESSON_STATUS, LessonSource, LessonStatus, NOTIFICATION_
 import { conflict, forbidden, notFound, validationError } from '../common/app-error';
 import { assertFutureDate, assertLessonInterval, cleanText, parseIsoDate, parseOptionalTaskNumbers, requireText } from '../common/validation';
 import { FilesService } from '../files/files.service';
+import { lessonConflicts, lockLessonPeople } from '../course-lessons/lesson-schedule';
 
 const ACTIVE_LESSON_STATUSES: LessonStatus[] = [LESSON_STATUS.PLANNED, LESSON_STATUS.RESCHEDULED];
 
@@ -35,21 +36,18 @@ export class LessonsService {
 
   async assertLessonBelongsToTeacher(teacherId: string, lessonId: string, tx: Prisma.TransactionClient = this.prisma) {
     const lesson = await tx.lesson.findFirst({ where: { id: lessonId, teacherId } });
-    if (!lesson) throw notFound('Урок не найден.');
-    return lesson;
+    if (!lesson || !lesson.studentId) throw notFound('Урок не найден.');
+    return { ...lesson, studentId: lesson.studentId };
   }
 
-  private async assertNoConflict(tx: Prisma.TransactionClient, teacherId: string, startAt: Date, endAt: Date, lessonId?: string) {
-    const conflictLesson = await tx.lesson.findFirst({
-      where: {
-        teacherId,
-        id: lessonId ? { not: lessonId } : undefined,
-        status: { in: ACTIVE_LESSON_STATUSES },
-        startAt: { lt: endAt },
-        endAt: { gt: startAt },
-      },
-    });
-    if (conflictLesson) throw conflict('У преподавателя уже есть занятие в это время.', { startAt: 'lesson_conflict' });
+  private async assertNoConflict(tx: Prisma.TransactionClient, teacherId: string, studentId: string, startAt: Date, endAt: Date, lessonId?: string, extraUserIds: string[] = []) {
+    const [teacher, student] = await Promise.all([
+      tx.teacherProfile.findUniqueOrThrow({ where: { id: teacherId }, select: { userId: true } }),
+      tx.studentProfile.findUniqueOrThrow({ where: { id: studentId }, select: { userId: true } }),
+    ]);
+    await lockLessonPeople(tx, [teacher.userId, student.userId, ...extraUserIds]);
+    if ((await lessonConflicts(tx, startAt, endAt, [teacher.userId], [student.userId], lessonId)).length)
+      throw conflict('У преподавателя или ученика уже есть занятие в это время.', { startAt: 'lesson_conflict' });
   }
 
   private parseLessonSource(value: unknown): LessonSource {
@@ -69,9 +67,12 @@ export class LessonsService {
     return this.withTeacherLock(teacherId, async (tx) => {
       await this.assertStudentBelongsToTeacher(teacherId, studentId, tx);
       assertFutureDate(startAt, 'startAt');
-      await this.assertNoConflict(tx, teacherId, startAt, endAt);
-      return tx.lesson.create({
+      const mapping = await tx.legacyCourseMapping.findUnique({ where: { studentProfileId: studentId } });
+      if (!mapping) throw notFound('Курс ученика не найден.');
+      await this.assertNoConflict(tx, teacherId, studentId, startAt, endAt);
+      const lesson = await tx.lesson.create({
       data: {
+        courseId: mapping.courseId,
         teacherId,
         studentId,
         topic: requireText(payload.topic, 'topic'),
@@ -86,6 +87,9 @@ export class LessonsService {
         materials,
       },
       });
+      await tx.lessonTeacher.create({ data: { lessonId: lesson.id, courseId: mapping.courseId, courseTeacherId: `legacy-course-teacher-${studentId}` } });
+      await tx.lessonParticipant.create({ data: { lessonId: lesson.id, courseId: mapping.courseId, enrollmentId: mapping.enrollmentId, responseStatus: 'accepted' } });
+      return lesson;
     });
   }
 
@@ -96,7 +100,10 @@ export class LessonsService {
     const studentId = patch.studentId !== undefined && cleanText(patch.studentId) !== lesson.studentId
       ? requireText(patch.studentId, 'studentId')
       : lesson.studentId;
-    if (studentId !== lesson.studentId) await this.assertStudentBelongsToTeacher(teacherId, studentId, tx);
+    if (studentId !== lesson.studentId) {
+      if (lesson.status === LESSON_STATUS.COMPLETED) throw conflict('Нельзя менять ученика проведённого урока.');
+      await this.assertStudentBelongsToTeacher(teacherId, studentId, tx);
+    }
     const startAt = patch.startAt !== undefined ? parseIsoDate(patch.startAt, 'startAt') : lesson.startAt;
     const endAt = patch.endAt !== undefined ? parseIsoDate(patch.endAt, 'endAt') : lesson.endAt;
     const durationMinutes = assertLessonInterval(startAt, endAt);
@@ -114,12 +121,20 @@ export class LessonsService {
     }
     if (status && !Object.values(LESSON_STATUS).includes(status as any)) throw validationError('Некорректный статус урока.', { status: 'invalid' });
     const nextStatus = (status || lesson.status) as LessonStatus;
+    const oldStudent = await tx.studentProfile.findUniqueOrThrow({ where: { id: lesson.studentId }, select: { userId: true } });
     if (ACTIVE_LESSON_STATUSES.includes(nextStatus) && (scheduleChanged || nextStatus !== lesson.status)) {
-      await this.assertNoConflict(tx, teacherId, startAt, endAt, lessonId);
+      await this.assertNoConflict(tx, teacherId, studentId, startAt, endAt, lessonId, [oldStudent.userId]);
     }
-    return tx.lesson.update({
+    const mapping = studentId !== lesson.studentId ? await tx.legacyCourseMapping.findUnique({ where: { studentProfileId: studentId } }) : null;
+    if (studentId !== lesson.studentId && !mapping) throw notFound('Курс ученика не найден.');
+    if (mapping) {
+      await tx.lessonTeacher.deleteMany({ where: { lessonId } });
+      await tx.lessonParticipant.deleteMany({ where: { lessonId } });
+    }
+    const updated = await tx.lesson.update({
       where: { id: lessonId },
       data: {
+        courseId: mapping?.courseId,
         studentId: studentId !== lesson.studentId ? studentId : undefined,
         topic: patch.topic !== undefined ? requireText(patch.topic, 'topic') : undefined,
         focusTaskNumbers: patch.focusTaskNumbers !== undefined ? parseOptionalTaskNumbers(patch.focusTaskNumbers, 'focusTaskNumbers') : undefined,
@@ -131,8 +146,14 @@ export class LessonsService {
         source,
         note: patch.note !== undefined ? cleanText(patch.note) : undefined,
         materials,
+        revision: { increment: 1 },
       },
     });
+    if (mapping) {
+      await tx.lessonTeacher.create({ data: { lessonId, courseId: mapping.courseId, courseTeacherId: `legacy-course-teacher-${studentId}` } });
+      await tx.lessonParticipant.create({ data: { lessonId, courseId: mapping.courseId, enrollmentId: mapping.enrollmentId, responseStatus: 'accepted' } });
+    }
+    return updated;
     });
   }
 
@@ -140,6 +161,7 @@ export class LessonsService {
     const teacherId = this.assertTeacher(user);
     return this.withTeacherLock(teacherId, async (tx) => {
     const lesson = await this.assertLessonBelongsToTeacher(teacherId, lessonId, tx);
+    const studentId = lesson.studentId;
     if (!ACTIVE_LESSON_STATUSES.includes(lesson.status as any)) {
       throw conflict('Завершить можно только активный запланированный урок.', { status: 'invalid_status' });
     }
@@ -159,16 +181,17 @@ export class LessonsService {
           completedAt,
           completionComment: comment,
           focusTaskNumbers,
+          revision: { increment: 1 },
         },
       });
 
       for (const taskNumber of focusTaskNumbers) {
-        const existing = await tx.studentTaskProgress.findUnique({ where: { studentId_taskNumber: { studentId: lesson.studentId, taskNumber } } });
+        const existing = await tx.studentTaskProgress.findUnique({ where: { studentId_taskNumber: { studentId, taskNumber } } });
         const lastAssessedMasteryLevel = existing?.masteryLevel || existing?.lastAssessedMasteryLevel || null;
         const progress = await tx.studentTaskProgress.upsert({
-          where: { studentId_taskNumber: { studentId: lesson.studentId, taskNumber } },
+          where: { studentId_taskNumber: { studentId, taskNumber } },
           create: {
-            studentId: lesson.studentId,
+            studentId,
             taskNumber,
             coverageStatus: PROGRESS_COVERAGE_STATUS.ASSESSMENT_NEEDED,
             masteryLevel: null,
@@ -192,7 +215,7 @@ export class LessonsService {
         });
         await tx.progressHistory.create({
           data: {
-            studentId: lesson.studentId,
+            studentId,
             taskProgressId: progress.id,
             taskNumber,
             lessonId: lesson.id,
@@ -208,7 +231,7 @@ export class LessonsService {
             type: NOTIFICATION_TYPE.PROGRESS_ASSESSMENT_REQUIRED,
             status: NOTIFICATION_STATUS.UNREAD,
             teacherId,
-            studentId: lesson.studentId,
+            studentId,
             taskNumber,
             lessonId: lesson.id,
             title: `Оцените освоение задания ${taskNumber}`,

@@ -1,6 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
-import { CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
+import { CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, LessonAttendance, LessonResponseStatus, LessonStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -141,6 +141,8 @@ Object.assign(responseSchemas, {
     fromTaskId: string, toTaskId: string, reason: string,
     programVersionId: string, leadTeacherUserId: string, teacherUserId: string, studentUserId: string,
     courseId: string, capacity: integer, title: string, from: string, to: string, count: integer,
+    teacherCount: integer, participantCount: integer, enrollmentId: string,
+    attendance: array(strictObject({ enrollmentId: string, attendance: enumeration(LessonAttendance) })),
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
   V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
@@ -213,4 +215,23 @@ Object.assign(responseSchemas, {
   V2EnrollmentBatchRow: strictObject({ studentUserId: string, displayName: { ...string, nullable: true }, eligible: boolean, reason: { ...string, nullable: true } }),
   V2EnrollmentBatchPreview: strictObject({ courseId: string, status: { type: 'string', enum: ['invited', 'active'] }, availableSeats: integer, canApply: boolean, items: array(ref('V2EnrollmentBatchRow')) }),
   V2EnrollmentBatchResult: strictObject({ courseId: string, items: array(ref('V2Enrollment')), appliedCount: integer, changed: array(string), requestId: string }),
+});
+
+Object.assign(responseSchemas, {
+  V2LessonTeacher: strictObject({ courseTeacherId: string, userId: string, displayName: string, role: enumeration(CourseTeacherRole) }),
+  V2LessonParticipant: strictObject({
+    enrollmentId: string, userId: string, displayName: string,
+    responseStatus: enumeration(LessonResponseStatus), attendance: enumeration(LessonAttendance),
+  }, ['enrollmentId', 'responseStatus', 'attendance']),
+  V2Lesson: strictObject({
+    id: string, courseId: string, courseTitle: string, topic: string, startAt: date, endAt: date,
+    timezone: string, format: enumeration(CourseFormat), status: enumeration(LessonStatus), revision: integer,
+    completedAt: { ...date, nullable: true }, legacy: boolean, note: string, completionComment: string,
+    teachers: array(ref('V2LessonTeacher')), participants: array(ref('V2LessonParticipant')),
+  }, ['id', 'courseId', 'courseTitle', 'topic', 'startAt', 'endAt', 'timezone', 'format', 'status', 'revision', 'completedAt', 'legacy', 'teachers', 'participants']),
+  V2LessonConflict: strictObject({ userId: string, kind: { type: 'string', enum: ['teacher', 'student'] } }),
+  V2LessonPreview: strictObject({ canCreate: boolean, conflicts: array(ref('V2LessonConflict')), participantCount: integer, teacherCount: integer }),
+  V2LessonPage: pageSchema(ref('V2Lesson')),
+  V2LessonDetail: detailSchema(ref('V2Lesson')),
+  V2LessonMutation: v2Mutation(ref('V2Lesson')),
 });

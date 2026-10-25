@@ -19,6 +19,7 @@ function api(overrides = {}) {
     course: vi.fn(async () => ({ item: course })),
     courseTeachers: vi.fn(async () => ({ items: [{ id: 'link-a', teacherUserId: 'teacher-a', displayName: 'Анна', role: 'lead', status: 'active', startsOn: '2026-10-01', endsOn: null, revision: 0 }], total: 1 })),
     courseEnrollments: vi.fn(async () => ({ items: [{ id: 'enrollment-a', studentUserId: 'student-a', displayName: 'Иван', status: 'active', startsOn: '2026-10-01', endsOn: null, goal: '', note: '', revision: 0 }], total: 1 })),
+    lessons: vi.fn(async () => page([])),
     members: vi.fn(async (_, query) => ({ items: query.role === 'teacher' ? [member('teacher-a', 'Анна', 'teacher')] : [member('student-a', 'Иван', 'student'), member('student-b', 'Мария', 'student')], pageInfo: { nextCursor: null, hasMore: false } })),
     programs: vi.fn(async () => page([{ id: 'program-a', name: 'ЕГЭ · физика', examType: 'ege', variant: 'profile', status: 'active' }])),
     versions: vi.fn(async () => page([{ id: 'version-a', period: '2027', revisionNumber: 1, status: 'published' }])),
