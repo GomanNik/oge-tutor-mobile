@@ -2655,7 +2655,7 @@ button:disabled,
 @media (max-width: 700px) {
   .workspace-header { align-items: start; flex-direction: column; padding: 14px 18px; }
   .workspace-header-actions { width: 100%; align-items: end; justify-content: flex-start; }
-  .workspace-header-actions label { flex: 1; }
+  .workspace-header-actions label { flex: 1 1 100%; }
   .workspace-header-actions select { min-width: 0; }
   .workspace-content { padding: 16px 18px 55px; }
   .workspace-tabs { gap: 16px; }
