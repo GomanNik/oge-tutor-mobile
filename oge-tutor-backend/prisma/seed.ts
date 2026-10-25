@@ -7,6 +7,16 @@ const prisma = new PrismaClient();
 async function main() {
   const passwordHash = await bcrypt.hash('123456', 12);
 
+  await prisma.materialPublicationRecipient.deleteMany();
+  await prisma.materialPublication.deleteMany();
+  await prisma.learningMaterial.deleteMany();
+  await prisma.assignmentReviewFile.deleteMany();
+  await prisma.assignmentReview.deleteMany();
+  await prisma.assignmentSubmissionFile.deleteMany();
+  await prisma.assignmentSubmission.deleteMany();
+  await prisma.assignmentRecipient.deleteMany();
+  await prisma.assignmentFile.deleteMany();
+  await prisma.assignment.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.progressHistory.deleteMany();
   await prisma.studentTaskProgress.deleteMany();

@@ -15,13 +15,14 @@ import * as Workspace from '../workspace/workspace.dto';
 import * as ProgramCatalog from '../program-catalog/program-catalog.dto';
 import * as Courses from '../courses/courses.dto';
 import * as CourseLessons from '../course-lessons/course-lessons.dto';
+import * as Assignments from '../assignments/assignments.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons), ...Object.values(Assignments),
 ];
 const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
@@ -148,6 +149,33 @@ Object.assign(contracts, {
   'post /api/v2/workspaces/{}/lessons/{}/complete': { request: 'CompleteCourseLessonDto', response: 'V2LessonMutation' },
   'post /api/v2/workspaces/{}/lessons/{}/attendance-corrections': { request: 'CorrectLessonAttendanceDto', response: 'V2LessonMutation' },
 } satisfies OperationContracts);
+Object.assign(contracts, {
+  'get /api/v2/workspaces/{}/assignments': { response: 'V2AssignmentPage' },
+  'get /api/v2/workspaces/{}/assignments/{}': { response: 'V2AssignmentDetail' },
+  'post /api/v2/workspaces/{}/assignments': { request: 'CreateAssignmentDto', response: 'V2AssignmentMutation' },
+  'patch /api/v2/workspaces/{}/assignments/{}': { request: 'UpdateAssignmentDto', response: 'V2AssignmentMutation' },
+  'post /api/v2/workspaces/{}/assignments/{}/publish': { request: 'AssignmentRecipientsDto', response: 'V2AssignmentMutation' },
+  'post /api/v2/workspaces/{}/assignments/{}/recipients': { request: 'AssignmentRecipientsDto', response: 'V2AssignmentMutation' },
+  'post /api/v2/workspaces/{}/assignments/{}/close': { request: 'WorkReasonDto', response: 'V2AssignmentMutation' },
+  'post /api/v2/workspaces/{}/assignments/{}/archive': { request: 'WorkReasonDto', response: 'V2AssignmentMutation' },
+  'get /api/v2/workspaces/{}/assignments/{}/recipients': { response: 'V2AssignmentRecipientPage' },
+  'patch /api/v2/workspaces/{}/assignments/{}/recipients/{}': { request: 'UpdateRecipientDto', response: 'V2AssignmentRecipientMutation' },
+  'get /api/v2/workspaces/{}/assignment-recipients/{}/submissions': { response: 'V2AssignmentSubmissionPage' },
+  'post /api/v2/workspaces/{}/assignment-recipients/{}/submissions': { request: 'SubmitAssignmentDto', response: 'V2AssignmentRecipientMutation' },
+  'post /api/v2/workspaces/{}/submissions/{}/reviews': { request: 'CreateReviewDto', response: 'V2AssignmentReviewMutation' },
+  'patch /api/v2/workspaces/{}/reviews/{}': { request: 'CreateReviewDto', response: 'V2AssignmentReviewMutation' },
+  'post /api/v2/workspaces/{}/reviews/{}/publish': { request: 'EmptyWorkDto', response: 'V2AssignmentReviewMutation' },
+  'get /api/v2/workspaces/{}/materials': { response: 'V2LearningMaterialPage' },
+  'get /api/v2/workspaces/{}/materials/{}': { response: 'V2LearningMaterialDetail' },
+  'post /api/v2/workspaces/{}/materials': { request: 'CreateLearningMaterialDto', response: 'V2LearningMaterialMutation' },
+  'patch /api/v2/workspaces/{}/materials/{}': { request: 'UpdateLearningMaterialDto', response: 'V2LearningMaterialMutation' },
+  'post /api/v2/workspaces/{}/materials/{}/publish': { request: 'PublishMaterialDto', response: 'V2LearningMaterialMutation' },
+  'post /api/v2/workspaces/{}/materials/{}/publications/{}/revoke': { request: 'WorkReasonDto', response: 'V2LearningMaterialMutation' },
+  'post /api/v2/workspaces/{}/materials/{}/archive': { request: 'WorkReasonDto', response: 'V2LearningMaterialMutation' },
+  'post /api/v2/workspaces/{}/files': { response: 'V2WorkFileMutation' },
+  'get /api/v2/workspaces/{}/files/{}/download': { response: { type: 'string', format: 'binary' } },
+  'delete /api/v2/workspaces/{}/files/{}': { response: 'V2WorkFileDeletion' },
+} satisfies OperationContracts);
 for (const [key, request] of Object.entries(mutationRequests)) {
   contracts[key] = { request, response: key.endsWith('/security/password') ? 'OkResponse' : 'MutationResponse', multipart: key.endsWith('/submissions') };
 }
@@ -193,16 +221,26 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
       }
       if (path.startsWith('/api/v2/') && method !== 'get') {
         const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete)$/.test(path)
+          || /\/workspaces\/[^/]+\/(?:assignments\/[^/]+\/(?:close|recipients)|assignment-recipients\/[^/]+\/submissions|submissions\/[^/]+\/reviews|materials\/[^/]+\/publications\/[^/]+\/revoke)$/.test(path)
           || /\/program-versions\/[^/]+\/tasks(?:\/[^/]+)?$/.test(path) || /\/program-versions\/[^/]+\/scoring-rule$/.test(path);
         const isIdempotentMutation = /\/invitations$|\/roles$/.test(path) || /\/api\/v2\/(subjects|programs|task-mappings)$/.test(path)
+          || /\/workspaces\/[^/]+\/(?:assignments|assignments\/[^/]+\/(?:publish|recipients)|assignment-recipients\/[^/]+\/submissions|submissions\/[^/]+\/reviews|reviews\/[^/]+\/publish|materials|materials\/[^/]+\/publish)$/.test(path)
           || /\/api\/v2\/programs\/[^/]+\/versions$/.test(path)
           || /\/api\/v2\/workspaces\/[^/]+\/courses(?:\/[^/]+\/(?:teachers|enrollments))?$/.test(path)
           || /\/api\/v2\/workspaces\/[^/]+\/enrollment-batches$/.test(path);
-        if (isRevisionMutation) operation.parameters.push({ name: 'If-Match', in: 'header', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Expected resource revision.' });
-        if (isIdempotentMutation) operation.parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
+        if (isRevisionMutation && !operation.parameters.some(p => !('$ref' in p) && p.in === 'header' && p.name.toLowerCase() === 'if-match')) operation.parameters.push({ name: 'If-Match', in: 'header', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Expected resource revision.' });
+        if (isIdempotentMutation && !operation.parameters.some(p => !('$ref' in p) && p.in === 'header' && p.name.toLowerCase() === 'idempotency-key')) operation.parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
       }
+      operation.parameters = operation.parameters.filter((parameter, index, all) => '$ref' in parameter || parameter.in !== 'header'
+        || all.findIndex(other => !('$ref' in other) && other.in === 'header' && other.name.toLowerCase() === parameter.name.toLowerCase()) === index);
       for (const parameter of operation.parameters) {
-        if ('$ref' in parameter || parameter.in !== 'path') continue;
+        if ('$ref' in parameter) continue;
+        if (parameter.in === 'header') {
+          if (parameter.name.toLowerCase() === 'if-match') Object.assign(parameter, { name: 'If-Match', required: true, schema: { type: 'integer', minimum: 0 } });
+          if (parameter.name.toLowerCase() === 'idempotency-key') Object.assign(parameter, { name: 'Idempotency-Key', required: true, schema: { type: 'string', minLength: 1, maxLength: 128 } });
+          continue;
+        }
+        if (parameter.in !== 'path') continue;
         parameter.required = true;
         parameter.schema = parameter.name === 'taskNumber'
           ? { type: 'integer', minimum: 1, maximum: 25 }
@@ -228,14 +266,14 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
           operation.responses[code] = jsonResponse(typeof contract.response === 'string' ? ref(contract.response) : contract.response, 'Successful response.');
         }
       }
-      if (method === 'get' && /^\/files\/\{[^}]+\}\/download$/.test(path)) {
+      if (method === 'get' && /\/files\/\{[^}]+\}\/download$/.test(path)) {
         operation.responses['200'] = { description: 'Authorized file download; Content-Type is the stored MIME type.', headers: { 'Content-Disposition': { schema: { type: 'string' } } }, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } };
       }
       const errors: Record<string, string> = { '400': 'DTO or request validation failed.', '422': 'Domain validation failed.', '429': 'Rate limit exceeded.', '500': 'Unexpected server error.' };
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
       if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
-      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete|cancel|attendance-corrections|tasks|scoring-rule)$/.test(path))) {
+      if (path.startsWith('/api/v2/') && (method === 'patch' || method === 'delete' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete|cancel|attendance-corrections|tasks|scoring-rule|close|submissions|reviews|recipients)$/.test(path))) {
         errors['412'] = 'Revision mismatch.';
         errors['428'] = 'If-Match header is required.';
       }

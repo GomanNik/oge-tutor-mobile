@@ -229,6 +229,9 @@ model User {
   revokedTaskMappings TaskMapping[] @relation("MappingRevoker")
   createdEnrollments Enrollment[]
   lessonAttendanceMarks LessonParticipant[] @relation("LessonAttendanceMarker")
+  assignments Assignment[]
+  assignmentReviews AssignmentReview[]
+  learningMaterials LearningMaterial[]
 
   @@index([role])
 }
@@ -297,6 +300,8 @@ model Workspace {
   catalogPrograms ExamProgram[]
   catalogAuditEvents CatalogAuditEvent[]
   courses Course[]
+  files FileResource[]
+  learningMaterials LearningMaterial[]
 }
 
 model CatalogGrant {
@@ -361,6 +366,7 @@ model ProgramVersion {
   tasks TaskDefinition[]
   scoringRule ScoringRule?
   courses Course[]
+  learningMaterials LearningMaterial[]
 
   @@unique([programId, period, revisionNumber])
   @@index([programId, status, period, id])
@@ -610,6 +616,8 @@ model Course {
   enrollments Enrollment[]
   lessons Lesson[]
   legacyMapping LegacyCourseMapping?
+  assignments Assignment[]
+  materialPublications MaterialPublication[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status, createdAt, id])
@@ -656,6 +664,8 @@ model Enrollment {
   updatedAt DateTime @updatedAt
   legacyMapping LegacyCourseMapping?
   lessonParticipants LessonParticipant[]
+  assignmentRecipients AssignmentRecipient[]
+  materialRecipients MaterialPublicationRecipient[]
 
   @@unique([id, courseId])
   @@index([courseId, status, createdAt, id])
@@ -699,6 +709,7 @@ model Lesson {
   notifications     Notification[]
   lessonTeachers    LessonTeacher[]
   participants      LessonParticipant[]
+  materialPublications MaterialPublication[]
 
   @@unique([id, courseId])
   @@index([courseId, status, startAt, id])
@@ -802,10 +813,202 @@ model FileResource {
   uploadedAt DateTime             @default(now())
   submissions HomeworkSubmission[]
   attachments MaterialAttachment[]
+  workspaceId String?
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  checksum String?
+  assignmentFiles AssignmentFile[]
+  submissionFiles AssignmentSubmissionFile[]
+  reviewFiles AssignmentReviewFile[]
+  learningMaterials LearningMaterial[]
 
   @@index([ownerId])
   @@index([scope])
   @@index([uploadedAt])
+  @@index([workspaceId, ownerId])
+}
+
+enum AssignmentStatus {
+  draft
+  published
+  closed
+  archived
+}
+
+enum AssignmentRecipientStatus {
+  assigned
+  submitted
+  needs_revision
+  reviewed
+  exempted
+  closed
+}
+
+enum AssignmentReviewStatus {
+  draft
+  published
+}
+
+enum AssignmentReviewDecision {
+  accepted
+  rework
+}
+
+model Assignment {
+  id String @id @default(cuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  title String
+  instructions String @default("")
+  taskDefinitionIds String[] @default([])
+  taskSnapshot Json @default("[]")
+  dueAt DateTime
+  status AssignmentStatus @default(draft)
+  revision Int @default(0)
+  createdByUserId String?
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  publishedAt DateTime?
+  closedAt DateTime?
+  closeReason String @default("")
+  legacyHomeworkId String? @unique
+  legacyState Json @default("{}")
+  legacyMaterials Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  files AssignmentFile[]
+  recipients AssignmentRecipient[]
+
+  @@unique([id, courseId])
+  @@index([courseId, status, dueAt, id])
+}
+
+model AssignmentFile {
+  assignmentId String
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  fileId String
+  file FileResource @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  @@id([assignmentId, fileId])
+  @@index([fileId])
+}
+
+model AssignmentRecipient {
+  id String @id @default(cuid())
+  assignmentId String
+  courseId String
+  assignment Assignment @relation(fields: [assignmentId, courseId], references: [id, courseId], onDelete: Restrict)
+  enrollmentId String
+  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Restrict)
+  dueAt DateTime
+  status AssignmentRecipientStatus @default(assigned)
+  reason String @default("")
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  submissions AssignmentSubmission[]
+  @@unique([assignmentId, enrollmentId])
+  @@index([enrollmentId, status, dueAt])
+}
+
+model AssignmentSubmission {
+  id String @id @default(cuid())
+  recipientId String
+  recipient AssignmentRecipient @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  attempt Int
+  text String @default("")
+  contentSnapshot Json
+  legacySubmissionId String? @unique
+  submittedAt DateTime @default(now())
+  files AssignmentSubmissionFile[]
+  reviews AssignmentReview[]
+  @@unique([recipientId, attempt])
+}
+
+model AssignmentSubmissionFile {
+  submissionId String
+  submission AssignmentSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  fileId String
+  file FileResource @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  @@id([submissionId, fileId])
+  @@index([fileId])
+}
+
+model AssignmentReview {
+  id String @id @default(cuid())
+  submissionId String
+  submission AssignmentSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  number Int
+  revision Int @default(0)
+  status AssignmentReviewStatus @default(draft)
+  decision AssignmentReviewDecision
+  comment String @default("")
+  scores Json @default("[]")
+  reason String @default("")
+  reviewerUserId String?
+  reviewer User? @relation(fields: [reviewerUserId], references: [id], onDelete: Restrict)
+  source String @default("user")
+  legacyMaterials Json @default("[]")
+  createdAt DateTime @default(now())
+  publishedAt DateTime?
+  files AssignmentReviewFile[]
+  @@unique([submissionId, number])
+}
+
+model AssignmentReviewFile {
+  reviewId String
+  review AssignmentReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  fileId String
+  file FileResource @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  @@id([reviewId, fileId])
+  @@index([fileId])
+}
+
+model LearningMaterial {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  programVersionId String
+  programVersion ProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  taskDefinitionIds String[] @default([])
+  title String
+  description String @default("")
+  url String @default("")
+  fileId String?
+  file FileResource? @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  createdByUserId String
+  legacyAttachmentId String? @unique
+  legacyState Json @default("{}")
+  createdBy User @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  revision Int @default(0)
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  publications MaterialPublication[]
+  @@index([workspaceId, programVersionId, archivedAt, createdAt, id])
+}
+
+model MaterialPublication {
+  id String @id @default(cuid())
+  materialId String
+  material LearningMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  lessonId String?
+  lesson Lesson? @relation(fields: [lessonId, courseId], references: [id, courseId], onDelete: Restrict)
+  publishedAt DateTime @default(now())
+  revokedAt DateTime?
+  revision Int @default(0)
+  recipients MaterialPublicationRecipient[]
+  @@unique([id, courseId])
+  @@index([courseId, revokedAt])
+}
+
+model MaterialPublicationRecipient {
+  publicationId String
+  courseId String
+  publication MaterialPublication @relation(fields: [publicationId, courseId], references: [id, courseId], onDelete: Restrict)
+  enrollmentId String
+  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Restrict)
+  @@id([publicationId, enrollmentId])
+  @@index([enrollmentId])
 }
 
 model MaterialTopic {

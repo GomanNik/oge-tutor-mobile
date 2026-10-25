@@ -1,6 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
-import { CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, LessonAttendance, LessonResponseStatus, LessonStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
+import { AssignmentRecipientStatus, AssignmentReviewDecision, AssignmentReviewStatus, AssignmentStatus, CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, LessonAttendance, LessonResponseStatus, LessonStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -133,7 +133,7 @@ Object.assign(responseSchemas, {
   V2Workspace: strictObject({ id: string, name: string, timezone: string, status: enumeration(WorkspaceStatus), revision: integer }),
   V2AuditChanges: strictObject({
     role: v2Role, roles: v2Roles,
-    status: { type: 'string', enum: [...Object.values(MembershipStatus), ...Object.values(CatalogStatus), ...Object.values(ProgramVersionStatus), ...Object.values(CourseStatus), ...Object.values(EnrollmentStatus), ...Object.values(CourseTeacherStatus)] },
+    status: { type: 'string', enum: [...Object.values(MembershipStatus), ...Object.values(CatalogStatus), ...Object.values(ProgramVersionStatus), ...Object.values(CourseStatus), ...Object.values(EnrollmentStatus), ...Object.values(CourseTeacherStatus), ...Object.values(AssignmentStatus), ...Object.values(AssignmentRecipientStatus)] },
     displayNameOverride: { ...string, nullable: true },
     code: string, name: string, subjectId: string, examType: enumeration(ExamType), variant: string,
     period: string, revisionNumber: integer, taskCount: integer, versionId: string,
@@ -143,6 +143,9 @@ Object.assign(responseSchemas, {
     courseId: string, capacity: integer, title: string, from: string, to: string, count: integer,
     teacherCount: integer, participantCount: integer, enrollmentId: string,
     attendance: array(strictObject({ enrollmentId: string, attendance: enumeration(LessonAttendance) })),
+    enrollmentIds: array(string), recipientId: string, attempt: integer, submissionId: string,
+    number: integer, decision: enumeration(AssignmentReviewDecision), mimeType: string, size: integer,
+    dueAt: date,
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
   V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
@@ -234,4 +237,59 @@ Object.assign(responseSchemas, {
   V2LessonPage: pageSchema(ref('V2Lesson')),
   V2LessonDetail: detailSchema(ref('V2Lesson')),
   V2LessonMutation: v2Mutation(ref('V2Lesson')),
+});
+
+const nullableDate = { ...date, nullable: true };
+const historical = { type: 'object', additionalProperties: true } as SchemaObject;
+const historicalArray = array(historical);
+const workFile = strictObject({ id: string, originalName: string, mimeType: string, size: integer, checksum: { ...string, nullable: true }, uploadedAt: date });
+const assignmentProperties = {
+  id: string, courseId: string, courseTitle: string, programVersionId: string,
+  title: string, instructions: string, taskDefinitionIds: array(string), tasks: array(ref('V2AssignmentTask')),
+  dueAt: date, status: enumeration(AssignmentStatus), revision: integer,
+  publishedAt: nullableDate, closedAt: nullableDate, closeReason: string, legacy: boolean,
+  legacyState: historical, legacyMaterials: historicalArray, files: array(ref('V2WorkFile')),
+};
+const assignmentRequired = Object.keys(assignmentProperties).filter(key => !key.startsWith('legacy'));
+Object.assign(responseSchemas, {
+  V2WorkFile: workFile,
+  V2AssignmentTask: strictObject({ id: string, code: string, title: string, maxScore: { ...integer, nullable: true }, criteria: array(ref('V2TaskCriterion')) }),
+  V2Assignment: strictObject(assignmentProperties, assignmentRequired),
+  V2AssignmentDetailItem: strictObject({ ...assignmentProperties, canReview: boolean }, [...assignmentRequired, 'canReview']),
+  V2AssignmentRecipient: strictObject({ id: string, assignmentId: string, enrollmentId: string, dueAt: date,
+    status: enumeration(AssignmentRecipientStatus), reason: string, revision: integer, overdue: boolean, displayName: string },
+  ['id', 'assignmentId', 'enrollmentId', 'dueAt', 'status', 'reason', 'revision', 'overdue']),
+  V2ReviewScore: strictObject({ taskDefinitionId: string, criterionCode: string, score: integer }, ['taskDefinitionId', 'score']),
+  V2AssignmentReview: strictObject({ id: string, submissionId: string, number: integer, revision: integer,
+    status: enumeration(AssignmentReviewStatus), decision: enumeration(AssignmentReviewDecision), comment: string,
+    scores: array(ref('V2ReviewScore')), reason: string, reviewerUserId: { ...string, nullable: true }, source: string,
+    createdAt: date, publishedAt: nullableDate, legacyMaterials: historicalArray, files: array(ref('V2WorkFile')) }),
+  V2AssignmentSubmission: strictObject({ id: string, recipientId: string, attempt: integer, text: string,
+    contentSnapshot: historical, submittedAt: date, late: boolean, files: array(ref('V2WorkFile')),
+    reviews: array(ref('V2AssignmentReview')) }),
+  V2LearningMaterial: strictObject({ id: string, programVersionId: string, programName: string, subjectName: string,
+    taskDefinitionIds: array(string), title: string, description: string, url: string,
+    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyState: historical,
+    revision: integer, archivedAt: nullableDate, createdAt: date },
+  ['id', 'programVersionId', 'programName', 'subjectName', 'taskDefinitionIds', 'title', 'description', 'url', 'file', 'legacy', 'revision', 'archivedAt', 'createdAt']),
+  V2MaterialPublication: strictObject({ id: string, courseId: string, lessonId: { ...string, nullable: true }, revision: integer,
+    publishedAt: date, revokedAt: nullableDate, recipientEnrollmentIds: array(string) }),
+  V2MaterialDetailItem: strictObject({ id: string, programVersionId: string, programName: string, subjectName: string,
+    taskDefinitionIds: array(string), title: string, description: string, url: string,
+    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyState: historical,
+    revision: integer, archivedAt: nullableDate, createdAt: date, canEdit: boolean, canArchive: boolean,
+    publications: array(ref('V2MaterialPublication')) },
+  ['id', 'programVersionId', 'programName', 'subjectName', 'taskDefinitionIds', 'title', 'description', 'url', 'file', 'legacy', 'revision', 'archivedAt', 'createdAt', 'canEdit', 'canArchive', 'publications']),
+  V2AssignmentPage: pageSchema(ref('V2Assignment')),
+  V2AssignmentDetail: detailSchema(ref('V2AssignmentDetailItem')),
+  V2AssignmentMutation: v2Mutation(ref('V2Assignment')),
+  V2AssignmentRecipientPage: pageSchema(ref('V2AssignmentRecipient')),
+  V2AssignmentRecipientMutation: v2Mutation(ref('V2AssignmentRecipient')),
+  V2AssignmentSubmissionPage: pageSchema(ref('V2AssignmentSubmission')),
+  V2AssignmentReviewMutation: v2Mutation(ref('V2AssignmentReview')),
+  V2LearningMaterialPage: pageSchema(ref('V2LearningMaterial')),
+  V2LearningMaterialDetail: detailSchema(ref('V2MaterialDetailItem')),
+  V2LearningMaterialMutation: v2Mutation(ref('V2LearningMaterial')),
+  V2WorkFileMutation: v2Mutation(ref('V2WorkFile')),
+  V2WorkFileDeletion: v2Mutation(strictObject({ id: string })),
 });

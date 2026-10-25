@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
 import { FILE_SCOPE, FileScope, MATERIAL_SOURCE, MATERIAL_TYPE, ROLE } from '../common/contracts';
@@ -25,7 +25,7 @@ export class FilesService {
     return FILE_SCOPE.PRIVATE_UPLOAD;
   }
 
-  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, meta: { title?: string; context?: string } = {}, db: Pick<PrismaService, 'fileResource'> = this.prisma) {
+  async saveUploadedFile(user: AuthUser, file: Express.Multer.File, meta: { title?: string; context?: string; workspaceId?: string } = {}, db: Pick<PrismaService, 'fileResource'> = this.prisma) {
     if (!file) throw validationError('Выберите файл.', { file: 'required' });
     if (!file.path) throw validationError('Upload must be streamed to disk.', { file: 'invalid_upload' });
     let storagePath: string | undefined;
@@ -38,6 +38,8 @@ export class FilesService {
       await fs.promises.mkdir(absoluteDir, { recursive: true });
       storagePath = path.join(absoluteDir, `${randomUUID()}.${detected.ext}`);
       await fs.promises.rename(file.path, storagePath);
+      const digest = createHash('sha256');
+      for await (const chunk of fs.createReadStream(storagePath)) digest.update(chunk);
       const fileId = randomUUID();
       const url = buildFileDownloadUrl(this.config, fileId);
       return await db.fileResource.create({
@@ -50,6 +52,8 @@ export class FilesService {
         size,
         url,
         storagePath,
+        workspaceId: meta.workspaceId,
+        checksum: digest.digest('hex'),
       },
       });
     } catch (error) {
@@ -76,6 +80,7 @@ export class FilesService {
 
   async requireAttachableFile(user: AuthUser, id: string) {
     const file = await this.requireFile(id);
+    if (file.workspaceId) throw forbidden('Файл доступен только через API пространства.');
     if (file.ownerId !== user.id) throw forbidden('Можно прикреплять только собственные файлы.');
     if (file.scope === FILE_SCOPE.PRIVATE_SUBMISSION) {
       throw forbidden('Файл решения нельзя прикреплять как материал.');
@@ -89,6 +94,7 @@ export class FilesService {
 
   private async requireDownloadAccess(user: AuthUser, id: string) {
     const file = await this.requireFile(id);
+    if (file.workspaceId) throw forbidden('Файл доступен только через API пространства.');
     if (file.ownerId === user.id) return file;
 
     if (user.role === ROLE.TEACHER && user.teacherId) {

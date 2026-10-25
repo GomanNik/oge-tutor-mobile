@@ -95,6 +95,17 @@ try {
   await db.$executeRawUnsafe(`
     INSERT INTO "Lesson" (id,"teacherId","studentId",topic,"startAt","endAt",timezone,"durationMinutes","updatedAt")
     VALUES ('legacy-lesson','legacy-t1','legacy-s1','Algebra',NOW()+INTERVAL '1 day',NOW()+INTERVAL '1 day 1 hour','UTC',60,NOW())`);
+  await db.$executeRawUnsafe(`INSERT INTO "FileResource" (id,"ownerId",scope,"originalName","mimeType",size,url,"storagePath")
+    VALUES ('legacy-file','legacy-su1','private_submission','answer.txt','text/plain',6,'/files/legacy-file','/tmp/legacy-answer.txt')`);
+  await db.$executeRawUnsafe(`INSERT INTO "Homework" (id,"teacherId","studentId",title,description,topic,"taskNumbers","dueAt",status,materials,"reviewMaterials","teacherComment","solutionFile","reviewedAt","closedAt","updatedAt")
+    VALUES ('legacy-homework','legacy-t1','legacy-s1','Historical assignment','Solve the task','Algebra',ARRAY[1],NOW()+INTERVAL '2 days','reviewed',
+      '[]'::jsonb,'[]'::jsonb,'Good work','answer.txt',NOW(),NOW(),NOW())`);
+  await db.$executeRawUnsafe(`INSERT INTO "HomeworkSubmission" (id,"homeworkId","studentId","fileResourceId","reviewStatus","reviewedAt","teacherComment")
+    VALUES ('legacy-submission','legacy-homework','legacy-s1','legacy-file','reviewed',NOW(),'Good work')`);
+  await db.$executeRawUnsafe(`INSERT INTO "MaterialTopic" (id,"teacherId","taskNumber",title,"updatedAt")
+    VALUES ('legacy-topic','legacy-t1',1,'Task 1',NOW())`);
+  await db.$executeRawUnsafe(`INSERT INTO "MaterialAttachment" (id,"topicId",type,source,title,url)
+    VALUES ('legacy-attachment','legacy-topic','link','link','Task 1 notes','https://example.test/notes')`);
   const before = await rows('SELECT id,email,"passwordHash",role FROM "User" ORDER BY id');
   const lessonBefore = await rows('SELECT id,"teacherId","studentId",topic FROM "Lesson"');
   const sessionBefore = await rows('SELECT id,"userId",version FROM "AuthSession"');
@@ -125,6 +136,39 @@ try {
     [{ id: 'legacy-course-legacy-s1', status: 'active', enrollmentStatus: 'active' }]);
   assert.deepEqual(await rows(`SELECT id,status FROM "ProgramVersion" WHERE id='legacy-version-oge-math'`),
     [{ id: 'legacy-version-oge-math', status: 'published' }]);
+  assert.deepEqual(await rows(`SELECT id,"legacyHomeworkId",status FROM "Assignment"`),
+    [{ id: 'legacy-assignment-legacy-homework', legacyHomeworkId: 'legacy-homework', status: 'published' }]);
+  assert.deepEqual(await rows(`SELECT id,"enrollmentId",status FROM "AssignmentRecipient"`),
+    [{ id: 'legacy-recipient-legacy-homework', enrollmentId: 'legacy-enrollment-legacy-s1', status: 'reviewed' }]);
+  assert.deepEqual(await rows(`SELECT id,"legacySubmissionId",attempt FROM "AssignmentSubmission"`),
+    [{ id: 'legacy-submission-legacy-submission', legacySubmissionId: 'legacy-submission', attempt: 1 }]);
+  assert.deepEqual(await rows(`SELECT "submissionId","fileId" FROM "AssignmentSubmissionFile"`),
+    [{ submissionId: 'legacy-submission-legacy-submission', fileId: 'legacy-file' }]);
+  assert.deepEqual(await rows(`SELECT "submissionId",decision,status FROM "AssignmentReview"`),
+    [{ submissionId: 'legacy-submission-legacy-submission', decision: 'accepted', status: 'published' }]);
+  assert.deepEqual(await rows(`SELECT id,"legacyAttachmentId" FROM "LearningMaterial"`),
+    [{ id: 'legacy-material-legacy-attachment', legacyAttachmentId: 'legacy-attachment' }]);
+  assert.deepEqual(await rows(`SELECT "publicationId","enrollmentId" FROM "MaterialPublicationRecipient"`),
+    [{ publicationId: 'legacy-material-publication-legacy-attachment-legacy-course-legacy-s1', enrollmentId: 'legacy-enrollment-legacy-s1' }]);
+  const activeMaterialPublications = async () => (await rows(`SELECT COUNT(*)::int AS count FROM "MaterialPublication"
+    WHERE "materialId"='legacy-material-legacy-attachment' AND "revokedAt" IS NULL`))[0].count;
+  assert.equal(await activeMaterialPublications(), 1);
+  await db.$executeRawUnsafe(`UPDATE "Homework" SET "taskNumbers"=ARRAY[]::INTEGER[] WHERE id='legacy-homework'`);
+  assert.equal(await activeMaterialPublications(), 0);
+  await db.$executeRawUnsafe(`UPDATE "Lesson" SET "focusTaskNumbers"=ARRAY[1] WHERE id='legacy-lesson'`);
+  assert.equal(await activeMaterialPublications(), 1);
+  await db.$executeRawUnsafe(`UPDATE "Lesson" SET "focusTaskNumbers"=ARRAY[]::INTEGER[] WHERE id='legacy-lesson'`);
+  assert.equal(await activeMaterialPublications(), 0);
+  await db.$executeRawUnsafe(`UPDATE "Homework" SET "taskNumbers"=ARRAY[1] WHERE id='legacy-homework'`);
+  assert.equal(await activeMaterialPublications(), 1);
+  await db.$executeRawUnsafe(`INSERT INTO "MaterialTopic" (id,"teacherId","taskNumber",title,"updatedAt")
+    VALUES ('legacy-topic-2','legacy-t1',2,'Task 2',NOW())`);
+  await db.$executeRawUnsafe(`UPDATE "MaterialAttachment" SET "topicId"='legacy-topic-2' WHERE id='legacy-attachment'`);
+  assert.equal(await activeMaterialPublications(), 0);
+  await db.$executeRawUnsafe(`UPDATE "MaterialAttachment" SET "topicId"='legacy-topic' WHERE id='legacy-attachment'`);
+  assert.equal(await activeMaterialPublications(), 1);
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "AssignmentSubmission" SET text='changed' WHERE id='legacy-submission-legacy-submission'`));
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "AssignmentReview" SET comment='changed' WHERE "submissionId"='legacy-submission-legacy-submission'`));
 
   const firstBackfill = JSON.parse(backfill().trim().split('\n').at(-1));
   assert.equal(firstBackfill.memberships, 0);

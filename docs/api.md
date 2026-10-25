@@ -50,6 +50,21 @@ All routes below start with `/api/v2/workspaces/:workspaceId/lessons` and requir
 
 Creates and updates validate active teacher assignments, active enrollments, course and assignment dates, IANA timezone, a 15–480 minute interval and all selected people's calendars across courses and workspaces. Adjacent half-open intervals do not conflict. A group course can host a one-student consultation; an individual course cannot host a group. Preview is advisory; the mutation rechecks conflicts under a serializable transaction and person locks. A conflicting or concurrent request returns `409`. Legacy lesson IDs/times are preserved and their v2 snapshots are read-only; v1 writes keep both models in sync. The full contract, migration and acceptance criteria are in [block 4](platform/block-4-lessons.md).
 
+## Assignments, reviews, materials and files v2 (Block 5)
+
+The routes start with `/api/v2/workspaces/:workspaceId`, require Bearer auth and `X-Active-Role`, and do not return the full cabinet snapshot. Lists have bounded `page`/`pageSize`, `total`, and course/status/search filters. The role and resource relation are checked on every read, mutation and download. See the [full Block 5 contract](platform/block-5-works-and-files.md) for state transitions, permission matrix and legacy migration behavior.
+
+| Routes | Purpose |
+|---|---|
+| `GET/POST /assignments`, `GET/PATCH /assignments/:id`, `POST /assignments/:id/{publish,recipients,close,archive}` | Draft and publish an assignment to an explicit roster; close/archive without erasing history. |
+| `GET /assignments/:id/recipients`, `PATCH /assignments/:id/recipients/:recipientId` | Personal due dates and recipient status. |
+| `GET/POST /assignment-recipients/:id/submissions` | Private, immutable submission attempts. |
+| `POST /submissions/:id/reviews`, `PATCH /reviews/:id`, `POST /reviews/:id/publish` | Draft, revise and publish a review; published corrections are new versions. |
+| `GET/POST /materials`, `GET/PATCH /materials/:id`, `POST /materials/:id/publish`, `POST /materials/:id/publications/:publicationId/revoke`, `POST /materials/:id/archive` | Versioned library and recipient-scoped publications. |
+| `POST /files`, `GET /files/:id/download`, `DELETE /files/:id` | Streaming upload, authorized download and removal of unlinked files. |
+
+Writes use `If-Match` where a revision is required; create/publish/submit operations use `Idempotency-Key`. Invalid revision gives 412 or 428; a duplicate key with a different body gives 409. Historic v1 homework and materials are imported as read-only v2 records and remain editable through v1 during the compatibility period.
+
 ## Response Contract
 
 - `POST /auth/login` and `GET /bootstrap` return `{ session, data, pagination }`. `data` contains the first page (25 items) of `students`, `lessons`, `homeworks`, `materials`, and `notifications`, plus the teacher profile where applicable.

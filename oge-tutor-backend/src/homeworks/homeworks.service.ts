@@ -74,9 +74,7 @@ export class HomeworksService {
     }
     const data: any = {};
     if (patch.studentId !== undefined && cleanText(patch.studentId) !== homework.studentId) {
-      const studentId = requireText(patch.studentId, 'studentId');
-      await this.assertStudentBelongsToTeacher(teacherId, studentId);
-      data.studentId = studentId;
+      throw validationError('Получателя опубликованной работы изменить нельзя. Создайте отдельную работу для другого ученика.', { studentId: 'immutable' });
     }
     if (patch.title !== undefined) data.title = requireText(patch.title, 'title');
     if (patch.description !== undefined) data.description = cleanText(patch.description);

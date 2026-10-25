@@ -1354,4 +1354,145 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(await prisma.lesson.count({ where: { startAt: plus(6, 12), courseId: { in: [group.id, secondCourse.id] } } })).toBe(1);
     expect(adminMember.workspaceId).toBe(workspace.id);
   });
+
+  it('runs group assignments, attempts, reviews, material publication and file ACL through the real API', async () => {
+    const passwordHash = await bcrypt.hash('work-pass-123', 4);
+    const makeUser = (email: string) => prisma.user.create({ data: { email, displayName: email.split('@')[0], passwordHash } });
+    const [admin, teacher, otherTeacher, studentA, studentB, studentC] = await Promise.all([
+      makeUser('work-admin-e2e@mail.ru'), makeUser('work-teacher-e2e@mail.ru'), makeUser('work-other-teacher-e2e@mail.ru'),
+      makeUser('work-a-e2e@mail.ru'), makeUser('work-b-e2e@mail.ru'), makeUser('work-c-e2e@mail.ru'),
+    ]);
+    const workspace = await prisma.workspace.create({ data: { name: 'Works E2E', slug: 'works-e2e', timezone: 'UTC' } });
+    const member = (userId: string, role: 'admin' | 'teacher' | 'student') => prisma.workspaceMembership.create({ data: { workspaceId: workspace.id, userId, roles: { create: [{ role }] } } });
+    const [adminMember, teacherMember, otherTeacherMember, aMember, bMember, cMember] = await Promise.all([
+      member(admin.id, 'admin'), member(teacher.id, 'teacher'), member(otherTeacher.id, 'teacher'),
+      member(studentA.id, 'student'), member(studentB.id, 'student'), member(studentC.id, 'student'),
+    ]);
+    const subject = await prisma.subject.create({ data: { scopeKey: 'global', code: 'work-physics', name: 'Физика' } });
+    const program = await prisma.examProgram.create({ data: { scopeKey: 'global', subjectId: subject.id, code: 'work-ege-physics', examType: 'ege', variant: 'base', name: 'ЕГЭ физика' } });
+    const version = await prisma.programVersion.create({ data: { programId: program.id, period: '2026', revisionNumber: 1, status: 'draft' } });
+    const task = await prisma.taskDefinition.create({ data: { programVersionId: version.id, code: 'T01', title: 'Механика', position: 1, kind: 'extended_answer', maxScore: 3, criteria: [{ code: 'c1', title: 'Решение', maxScore: 2 }, { code: 'c2', title: 'Ответ', maxScore: 1 }] } });
+    await prisma.programVersion.update({ where: { id: version.id }, data: { status: 'published', publishedAt: new Date() } });
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const course = await prisma.course.create({ data: { workspaceId: workspace.id, programVersionId: version.id, title: 'ЕГЭ физика · группа', defaultFormat: 'group', capacity: 5, startsOn: today, timezone: 'UTC', status: 'active' } });
+    await prisma.courseTeacher.create({ data: { workspaceId: workspace.id, courseId: course.id, membershipId: teacherMember.id, role: 'lead', startsOn: today } });
+    const enroll = (membershipId: string) => prisma.enrollment.create({ data: { workspaceId: workspace.id, courseId: course.id, membershipId, status: 'active', startsOn: today } });
+    const [a, b, c] = await Promise.all([enroll(aMember.id), enroll(bMember.id), enroll(cMember.id)]);
+    const { AuthService } = await import('../../src/auth/auth.service');
+    const login = async (email: string) => (await app.get(AuthService).signAccountSession((await prisma.user.findUniqueOrThrow({ where: { email } })).id)).token;
+    const [adminToken, teacherToken, otherTeacherToken, aToken, bToken, cToken] = await Promise.all([
+      login(admin.email), login(teacher.email), login(otherTeacher.email), login(studentA.email), login(studentB.email), login(studentC.email),
+    ]);
+    const headers = (token: string, role: string) => ({ ...auth(token), 'X-Active-Role': role });
+    const teacherHeaders = headers(teacherToken, 'teacher');
+    const aHeaders = headers(aToken, 'student');
+    const bHeaders = headers(bToken, 'student');
+    const cHeaders = headers(cToken, 'student');
+    const path = `/api/v2/workspaces/${workspace.id}`;
+    const dueAt = new Date(Date.now() + 8 * 86400000).toISOString();
+    const createBody = { courseId: course.id, title: 'Механика · работа 1', instructions: 'Решить задачу и приложить расчёт.', taskDefinitionIds: [task.id], dueAt, fileIds: [] };
+    await request(server).post(`${path}/assignments`).set(teacherHeaders).send(createBody).expect(400);
+    await request(server).post(`${path}/assignments`).set(headers(otherTeacherToken, 'teacher')).set('Idempotency-Key', 'wrong-course').send(createBody).expect(404);
+    await request(server).post(`${path}/assignments`).set(teacherHeaders).set('Idempotency-Key', 'bad-task').send({ ...createBody, taskDefinitionIds: ['foreign-task'] }).expect(422);
+    const created = await request(server).post(`${path}/assignments`).set(teacherHeaders).set('Idempotency-Key', 'work-one').send(createBody).expect(200);
+    const assignmentId = created.body.item.id;
+    await request(server).post(`${path}/assignments`).set(teacherHeaders).set('Idempotency-Key', 'work-one').send(createBody).expect(200)
+      .expect(({ body }) => expect(body.item.id).toBe(assignmentId));
+    await request(server).get(`${path}/assignments`).set(aHeaders).expect(200).expect(({ body }) => expect(body.items).toHaveLength(0));
+    await request(server).post(`${path}/assignments/${assignmentId}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'publish-one')
+      .send({ recipientEnrollmentIds: [a.id, b.id] }).expect(200);
+    await request(server).post(`${path}/assignments/${assignmentId}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'publish-one')
+      .send({ recipientEnrollmentIds: [a.id, b.id] }).expect(200);
+    await request(server).get(`${path}/assignments`).set(cHeaders).expect(200).expect(({ body }) => expect(body.items).toHaveLength(0));
+    await request(server).get(`${path}/assignments/${assignmentId}/recipients`).set(aHeaders).expect(200)
+      .expect(({ body }) => { expect(body.total).toBe(1); expect(body.items[0]).not.toHaveProperty('displayName'); });
+    const recipients = await request(server).get(`${path}/assignments/${assignmentId}/recipients`).set(teacherHeaders).expect(200);
+    const recipientA = recipients.body.items.find((item: any) => item.enrollmentId === a.id);
+    const recipientB = recipients.body.items.find((item: any) => item.enrollmentId === b.id);
+    await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(bHeaders).expect(404);
+    await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(headers(adminToken, 'admin')).expect(404);
+    const upload = await request(server).post(`${path}/files`).set(aHeaders).attach('file', Buffer.from('private work answer'), 'answer.txt').expect(200);
+    const answerFile = upload.body.item;
+    expect(answerFile.checksum).toMatch(/^[0-9a-f]{64}$/);
+    await request(server).get(`${path}/files/${answerFile.id}/download`).set(bHeaders).expect(404);
+    await request(server).get(`${path}/files/${answerFile.id}/download`).set(headers(adminToken, 'admin')).expect(404);
+    await request(server).get(`/files/${answerFile.id}/download`).set(auth(teacherToken)).expect(401);
+    const submission = await request(server).post(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders)
+      .set('If-Match', '0').set('Idempotency-Key', 'submit-one').send({ text: 'Расчёт приложен.', fileIds: [answerFile.id] }).expect(200);
+    expect(submission.body.item.status).toBe('submitted');
+    await request(server).post(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders)
+      .set('If-Match', '0').set('Idempotency-Key', 'submit-one').send({ text: 'Расчёт приложен.', fileIds: [answerFile.id] }).expect(200);
+    await request(server).get(`${path}/files/${answerFile.id}/download`).set(teacherHeaders).expect(200);
+    const attempts = await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(teacherHeaders).expect(200);
+    expect(attempts.body.total).toBe(1);
+    const submissionId = attempts.body.items[0].id;
+    const reviewBody = { decision: 'rework', comment: 'Уточните последний шаг.', scores: [{ taskDefinitionId: task.id, criterionCode: 'c1', score: 1 }, { taskDefinitionId: task.id, criterionCode: 'c2', score: 0 }], fileIds: [] };
+    await request(server).post(`${path}/submissions/${submissionId}/reviews`).set(headers(adminToken, 'admin')).set('If-Match', '1').set('Idempotency-Key', 'admin-review').send(reviewBody).expect(404);
+    await request(server).post(`${path}/submissions/${submissionId}/reviews`).set(teacherHeaders).set('If-Match', '1').set('Idempotency-Key', 'invalid-score')
+      .send({ ...reviewBody, scores: [{ taskDefinitionId: task.id, criterionCode: 'c1', score: 4 }] }).expect(422);
+    const drafted = await request(server).post(`${path}/submissions/${submissionId}/reviews`).set(teacherHeaders).set('If-Match', '1').set('Idempotency-Key', 'draft-one').send(reviewBody).expect(200);
+    const reviewId = drafted.body.item.id;
+    await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders).expect(200)
+      .expect(({ body }) => expect(body.items[0].reviews).toHaveLength(0));
+    await request(server).post(`${path}/reviews/${reviewId}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'review-publish-one').send({}).expect(200);
+    await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders).expect(200)
+      .expect(({ body }) => expect(body.items[0].reviews[0].decision).toBe('rework'));
+    await request(server).post(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders)
+      .set('If-Match', '3').set('Idempotency-Key', 'submit-two').send({ text: 'Исправленный ответ.', fileIds: [] }).expect(200);
+    const latest = await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(teacherHeaders).expect(200);
+    expect(latest.body.total).toBe(2);
+    const secondId = latest.body.items[0].id;
+    const accepted = await request(server).post(`${path}/submissions/${secondId}/reviews`).set(teacherHeaders)
+      .set('If-Match', '4').set('Idempotency-Key', 'draft-two').send({ ...reviewBody, decision: 'accepted', comment: 'Верно.' }).expect(200);
+    await request(server).post(`${path}/reviews/${accepted.body.item.id}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'publish-two').send({}).expect(200);
+    const correction = await request(server).post(`${path}/submissions/${secondId}/reviews`).set(teacherHeaders)
+      .set('If-Match', '6').set('Idempotency-Key', 'correction').send({ ...reviewBody, decision: 'accepted', comment: 'Уточнённый балл.', reason: 'Исправлена оценка по критерию' }).expect(200);
+    await request(server).post(`${path}/reviews/${correction.body.item.id}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'publish-correction').send({}).expect(200);
+    const history = await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders).expect(200);
+    expect(history.body.items[0].reviews).toHaveLength(2);
+    await request(server).post(`${path}/assignments/${assignmentId}/close`).set(teacherHeaders).set('If-Match', '1').send({ reason: 'Период работы завершён' }).expect(200);
+    await request(server).get(`${path}/assignments/${assignmentId}/recipients`).set(bHeaders).expect(200)
+      .expect(({ body }) => expect(body.items[0].status).toBe('closed'));
+    const materialFile = (await request(server).post(`${path}/files`).set(teacherHeaders).attach('file', Buffer.from('reference notes'), 'reference.txt').expect(200)).body.item;
+    const materialBody = { programVersionId: version.id, title: 'Разбор механики', description: 'Опорный конспект', taskDefinitionIds: [task.id], fileId: materialFile.id };
+    const material = await request(server).post(`${path}/materials`).set(teacherHeaders).set('Idempotency-Key', 'material-one').send(materialBody).expect(200);
+    const materialId = material.body.item.id;
+    await request(server).patch(`${path}/materials/${materialId}`).set(headers(adminToken, 'admin')).set('If-Match', '0')
+      .send({ description: 'Уточнённый конспект', fileId: materialFile.id }).expect(200);
+    await request(server).get(`${path}/materials/${materialId}`).set(aHeaders).expect(404);
+    await request(server).get(`${path}/files/${materialFile.id}/download`).set(aHeaders).expect(404);
+    await request(server).post(`${path}/materials/${materialId}/publish`).set(teacherHeaders).set('If-Match', '1').set('Idempotency-Key', 'material-publish')
+      .send({ courseId: course.id, recipientEnrollmentIds: [a.id] }).expect(200);
+    await request(server).get(`${path}/materials/${materialId}`).set(aHeaders).expect(200);
+    await request(server).get(`${path}/materials/${materialId}`).set(bHeaders).expect(404);
+    await request(server).get(`${path}/files/${materialFile.id}/download`).set(aHeaders).expect(200);
+    const otherCourse = await prisma.course.create({ data: { workspaceId: workspace.id, programVersionId: version.id, title: 'Другой курс физики', defaultFormat: 'individual', capacity: 1, startsOn: today, timezone: 'UTC', status: 'active' } });
+    await prisma.courseTeacher.create({ data: { workspaceId: workspace.id, courseId: otherCourse.id, membershipId: otherTeacherMember.id, role: 'lead', startsOn: today } });
+    const otherEnrollment = await prisma.enrollment.create({ data: { workspaceId: workspace.id, courseId: otherCourse.id, membershipId: cMember.id, status: 'active', startsOn: today } });
+    await request(server).post(`${path}/materials/${materialId}/publish`).set(headers(adminToken, 'admin')).set('If-Match', '2').set('Idempotency-Key', 'material-other-course')
+      .send({ courseId: otherCourse.id, recipientEnrollmentIds: [otherEnrollment.id] }).expect(200);
+    const materialDetail = await request(server).get(`${path}/materials/${materialId}`).set(teacherHeaders).expect(200);
+    expect(materialDetail.body.item.publications).toHaveLength(1);
+    expect(materialDetail.body.item.publications[0].courseId).toBe(course.id);
+    expect(materialDetail.body.item.canEdit).toBe(false);
+    expect(materialDetail.body.item.canArchive).toBe(true);
+    await request(server).post(`${path}/materials/${materialId}/publications/${materialDetail.body.item.publications[0].id}/revoke`)
+      .set(teacherHeaders).set('If-Match', '0').send({ reason: 'Обновлённая редакция материала' }).expect(200);
+    const hiddenPublication = await prisma.materialPublication.findFirstOrThrow({ where: { materialId, courseId: otherCourse.id } });
+    await request(server).post(`${path}/materials/${materialId}/publications/${hiddenPublication.id}/revoke`)
+      .set(teacherHeaders).set('If-Match', '0').send({ reason: 'Чужой курс недоступен' }).expect(404);
+    await request(server).get(`${path}/materials/${materialId}`).set(teacherHeaders).expect(200)
+      .expect(({ body }) => { expect(body.item.publications).toHaveLength(1); expect(body.item.canEdit).toBe(false); });
+    await request(server).get(`${path}/files/${materialFile.id}/download`).set(aHeaders).expect(404);
+    await request(server).get(`${path}/materials/${materialId}`).set(cHeaders).expect(200);
+    await request(server).post(`${path}/materials/${materialId}/archive`).set(teacherHeaders).set('If-Match', '4')
+      .send({ reason: 'Материал заменён новой редакцией' }).expect(200);
+    await request(server).get(`${path}/materials/${materialId}`).set(cHeaders).expect(404);
+    await request(server).get(`${path}/files/${materialFile.id}/download`).set(cHeaders).expect(404);
+    expect(await prisma.assignmentSubmission.count({ where: { recipientId: recipientA.id } })).toBe(2);
+    expect(await prisma.assignmentReview.count({ where: { submissionId: secondId } })).toBe(2);
+    expect(adminMember.workspaceId).toBe(workspace.id);
+    expect(otherTeacherMember.workspaceId).toBe(workspace.id);
+    expect(c.id).toBeTruthy();
+  });
 });

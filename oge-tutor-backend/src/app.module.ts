@@ -23,6 +23,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
 import { ProgramCatalogModule } from './program-catalog/program-catalog.module';
 import { CoursesModule } from './courses/courses.module';
 import { CourseLessonsModule } from './course-lessons/course-lessons.module';
+import { AssignmentsModule } from './assignments/assignments.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
@@ -56,6 +57,7 @@ import { authTargetTracker, AUTH_THROTTLE_TTL_MS } from './auth/auth-throttle';
     ProgramCatalogModule,
     CoursesModule,
     CourseLessonsModule,
+    AssignmentsModule,
     ObservabilityModule,
   ],
   providers: [

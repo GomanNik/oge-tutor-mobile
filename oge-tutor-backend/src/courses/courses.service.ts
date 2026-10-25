@@ -244,6 +244,8 @@ export class CoursesService {
         activate: ['draft', 'paused'], pause: ['active'], complete: ['active', 'paused'], archive: ['draft', 'completed'],
       };
       if (!allowed[action].includes(course.status)) throw conflict('invalid_state', 'Недопустимый переход курса.');
+      if (['pause', 'complete', 'archive'].includes(action) && await tx.assignmentRecipient.count({ where: { courseId: id, status: { in: ['assigned', 'submitted', 'needs_revision'] } } }))
+        throw conflict('open_assignments', 'Сначала проверьте сданные работы и закройте или освободите остальных получателей.');
       if (action === 'complete' && await tx.lesson.count({ where: { courseId: id, status: { in: ['planned', 'rescheduled'] }, endAt: { gt: new Date() } } }))
         throw conflict('future_lessons', 'Перед завершением курса отмените или проведите будущие занятия.');
       if (action === 'activate') {
@@ -352,6 +354,8 @@ export class CoursesService {
         invited: ['active', 'withdrawn'], active: ['paused', 'completed', 'withdrawn'], paused: ['active', 'completed', 'withdrawn'], completed: [], withdrawn: [],
       };
       if (body.status && !transitions[current.status].includes(body.status)) throw conflict('invalid_state', 'Недопустимый переход зачисления.');
+      if (body.status && ['paused', 'completed', 'withdrawn'].includes(body.status) && await tx.assignmentRecipient.count({ where: { enrollmentId: id, status: { in: ['assigned', 'submitted', 'needs_revision'] } } }))
+        throw conflict('open_assignments', 'Сначала проверьте сданные работы ученика и закройте или освободите остальные.');
       if (body.status && ['paused', 'completed', 'withdrawn'].includes(body.status)
         && await tx.lessonParticipant.count({ where: { enrollmentId: id, lesson: { status: { in: ['planned', 'rescheduled'] }, endAt: { gt: new Date() } } } }))
         throw conflict('future_lessons', 'Сначала измените состав будущих занятий.');
