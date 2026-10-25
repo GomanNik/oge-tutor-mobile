@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsISO8601, IsOptional, IsString, Length, Matches, Max, Min, ValidateIf } from 'class-validator';
 import { LearningDeliveryStatus, LearningProgressSource, LearningVisibility, ProgressCoverageStatus, ProgressMasteryLevel } from '@prisma/client';
 
 export class LearningPageDto {
@@ -19,7 +19,7 @@ export class CreateAssessmentDto {
   @ApiProperty({ enum: LearningVisibility }) @IsEnum(LearningVisibility) visibility!: LearningVisibility;
   @ApiPropertyOptional({ enum: ProgressCoverageStatus }) @IsOptional() @IsEnum(ProgressCoverageStatus) coverageStatus?: ProgressCoverageStatus;
   @ApiPropertyOptional({ enum: ProgressMasteryLevel }) @IsOptional() @IsEnum(ProgressMasteryLevel) masteryLevel?: ProgressMasteryLevel;
-  @ApiPropertyOptional({ minimum: 0, maximum: 1000 }) @IsOptional() @IsInt() @Min(0) @Max(1000) score?: number;
+  @ApiPropertyOptional({ minimum: 0, maximum: 1000 }) @ValidateIf((_object, value) => value !== undefined) @IsInt() @Min(0) @Max(1000) score?: number;
   @ApiProperty() @IsString() @Length(5, 1000) @Matches(/\S/) basis!: string;
   @ApiProperty() @IsString() @Length(0, 5000) comment!: string;
   @ApiPropertyOptional() @IsOptional() @IsISO8601({ strict: true }) @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/) occurredAt?: string;

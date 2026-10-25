@@ -1542,6 +1542,9 @@ describeIfDb('AppModule e2e production flows', () => {
     await postAssessment({ ...assessment, coverageStatus: 'in_progress' }, 'inconsistent-score').expect(422);
     await postAssessment({ ...assessment, basis: '    x' }, 'blank-basis').expect(422);
     await postAssessment({ ...assessment, occurredAt: '2026-10-01T12:00:00' }, 'missing-timezone').expect(400);
+    await postAssessment({ ...assessment, score: null }, 'null-score').expect(400);
+    await postAssessment({ ...assessment, score: -1 }, 'negative-score').expect(400);
+    await postAssessment({ ...assessment, score: 5 }, 'score-over-task-maximum').expect(422);
     await postAssessment(assessment, 'student-assessment', 3).expect(403);
     await postAssessment(assessment, 'admin-assessment', 0).expect(403);
     await request(server).get(`${path}/enrollments/${peerEnrollment.id}/progress`).set(headers(3)).expect(404);
