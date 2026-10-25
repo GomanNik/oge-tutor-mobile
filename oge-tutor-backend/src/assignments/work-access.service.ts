@@ -69,11 +69,18 @@ export class WorkAccessService {
   }
 
   async transaction<T>(ctx: WorkspaceContext, action: (tx: WorkTx) => Promise<T>): Promise<T> {
-    try {
-      return await this.prisma.$transaction(async tx => { await this.live(tx, ctx); return action(tx); }, { isolationLevel: 'Serializable', timeout: 15000 });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2034', 'P2002'].includes(error.code)) throw workConflict('concurrent_update', 'Параллельное изменение. Обновите данные и повторите запрос с тем же ключом.');
-      throw error;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction(async tx => { await this.live(tx, ctx); return action(tx); }, { isolationLevel: 'Serializable', timeout: 15000 });
+      } catch (error) {
+        // PostgreSQL has rolled back this transaction, including its idempotency record.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
+          continue;
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2034', 'P2002'].includes(error.code)) throw workConflict('concurrent_update', 'Параллельное изменение. Обновите данные и повторите запрос с тем же ключом.');
+        throw error;
+      }
     }
   }
 
