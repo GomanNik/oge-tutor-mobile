@@ -1,6 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
-import { CatalogStatus, DeliveryStatus, ExamType, InvitationStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
+import { CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -133,12 +133,14 @@ Object.assign(responseSchemas, {
   V2Workspace: strictObject({ id: string, name: string, timezone: string, status: enumeration(WorkspaceStatus), revision: integer }),
   V2AuditChanges: strictObject({
     role: v2Role, roles: v2Roles,
-    status: { type: 'string', enum: [...Object.values(MembershipStatus), ...Object.values(CatalogStatus), ...Object.values(ProgramVersionStatus)] },
+    status: { type: 'string', enum: [...Object.values(MembershipStatus), ...Object.values(CatalogStatus), ...Object.values(ProgramVersionStatus), ...Object.values(CourseStatus), ...Object.values(EnrollmentStatus), ...Object.values(CourseTeacherStatus)] },
     displayNameOverride: { ...string, nullable: true },
     code: string, name: string, subjectId: string, examType: enumeration(ExamType), variant: string,
     period: string, revisionNumber: integer, taskCount: integer, versionId: string,
     sourceUrl: { ...string, nullable: true }, notes: string, kind: enumeration(ScoringRuleKind),
     fromTaskId: string, toTaskId: string, reason: string,
+    programVersionId: string, leadTeacherUserId: string, teacherUserId: string, studentUserId: string,
+    courseId: string, capacity: integer, title: string, from: string, to: string, count: integer,
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
   V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
@@ -179,4 +181,36 @@ Object.assign(responseSchemas, {
   V2ScoringRuleMutation: catalogTaskMutation(ref('V2ScoringRule')),
   V2TaskMappingPage: pageSchema(ref('V2TaskMapping')),
   V2TaskMappingMutation: catalogMutation(ref('V2TaskMapping')),
+});
+
+Object.assign(responseSchemas, {
+  V2CourseProgram: strictObject({ id: string, name: string, examType: enumeration(ExamType), variant: string, subjectId: string, subjectName: string, period: string, revisionNumber: integer }),
+  V2Course: strictObject({
+    id: string, workspaceId: string, programVersionId: string, program: ref('V2CourseProgram'),
+    title: string, defaultFormat: enumeration(CourseFormat), capacity: integer,
+    startsOn: { type: 'string', format: 'date' }, endsOn: { type: 'string', format: 'date', nullable: true },
+    timezone: string, status: enumeration(CourseStatus), revision: integer,
+    activeEnrollmentCount: { ...integer, nullable: true }, legacy: boolean, ...timestamps,
+  }),
+  V2CourseTeacher: strictObject({
+    id: string, teacherUserId: string, displayName: string, role: enumeration(CourseTeacherRole),
+    status: enumeration(CourseTeacherStatus), startsOn: { type: 'string', format: 'date' },
+    endsOn: { type: 'string', format: 'date', nullable: true }, revision: integer,
+  }),
+  V2Enrollment: strictObject({
+    id: string, studentUserId: string, displayName: string, status: enumeration(EnrollmentStatus),
+    startsOn: { type: 'string', format: 'date', nullable: true }, endsOn: { type: 'string', format: 'date', nullable: true },
+    goal: string, note: string, revision: integer,
+  }, ['id', 'studentUserId', 'displayName', 'status', 'startsOn', 'endsOn', 'goal', 'revision']),
+  V2CoursePage: pageSchema(ref('V2Course')),
+  V2CourseDetail: detailSchema(ref('V2Course')),
+  V2CourseMutation: v2Mutation(ref('V2Course')),
+  V2CourseTeacherList: strictObject({ items: array(ref('V2CourseTeacher')), total: integer }),
+  V2CourseTeacherMutation: v2Mutation(ref('V2CourseTeacher')),
+  V2EnrollmentList: strictObject({ items: array(ref('V2Enrollment')), total: integer }),
+  V2EnrollmentDetail: detailSchema(ref('V2Enrollment')),
+  V2EnrollmentMutation: v2Mutation(ref('V2Enrollment')),
+  V2EnrollmentBatchRow: strictObject({ studentUserId: string, displayName: { ...string, nullable: true }, eligible: boolean, reason: { ...string, nullable: true } }),
+  V2EnrollmentBatchPreview: strictObject({ courseId: string, status: { type: 'string', enum: ['invited', 'active'] }, availableSeats: integer, canApply: boolean, items: array(ref('V2EnrollmentBatchRow')) }),
+  V2EnrollmentBatchResult: strictObject({ courseId: string, items: array(ref('V2Enrollment')), appliedCount: integer, changed: array(string), requestId: string }),
 });

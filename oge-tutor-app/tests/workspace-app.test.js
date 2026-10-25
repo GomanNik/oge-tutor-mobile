@@ -26,6 +26,7 @@ function api(overrides = {}) {
     members: vi.fn(async context => page([member(context.workspaceId, `Member ${context.workspaceId}`)])),
     invitations: vi.fn(async () => page([])),
     audit: vi.fn(async () => page([])),
+    courses: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 25 })),
     ...overrides,
   };
 }
@@ -98,7 +99,7 @@ describe('WorkspaceApp', () => {
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: account.email } });
     fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
-    await screen.findByRole('heading', { name: 'Ученик' });
+    await screen.findByRole('heading', { name: 'Курсы' });
     expect(screen.queryByRole('button', { name: 'Открыть учебный кабинет' })).toBeNull();
   });
 

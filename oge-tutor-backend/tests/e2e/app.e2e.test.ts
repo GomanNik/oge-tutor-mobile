@@ -109,6 +109,10 @@ describeIfDb('AppModule e2e production flows', () => {
     prisma = app.get(PrismaService);
     server = app.getHttpServer();
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "Workspace", "Notification", "ProgressHistory", "StudentTaskProgress", "MaterialAttachment", "MaterialTopic", "HomeworkSubmission", "Homework", "Lesson", "FileResource", "AccessToken", "StudentProfile", "TeacherProfile", "User" RESTART IDENTITY CASCADE');
+    // TRUNCATE CASCADE also removes the global catalog because its tables contain optional workspace FKs.
+    await prisma.subject.create({ data: { id: 'legacy-subject-math', scopeKey: 'global', code: 'math', name: 'Математика' } });
+    await prisma.examProgram.create({ data: { id: 'legacy-program-oge-math', scopeKey: 'global', subjectId: 'legacy-subject-math', code: 'oge-math', examType: 'oge', variant: 'general', name: 'ОГЭ · математика' } });
+    await prisma.programVersion.create({ data: { id: 'legacy-version-oge-math', programId: 'legacy-program-oge-math', period: 'legacy-import', revisionNumber: 1, status: 'published', publishedAt: new Date() } });
 
     const initialTeacher = await prisma.user.create({
       data: {
@@ -1087,5 +1091,137 @@ describeIfDb('AppModule e2e production flows', () => {
     await request(server).get('/api/v2/me').set(auth(globalToken)).expect(200)
       .expect(({ body }) => expect(body.item.catalogManage).toBe(false));
     await create('/api/v2/subjects', auth(globalToken), 'revoked-grant', { code: 'revoked-test', name: 'Недоступно' }).expect(403);
+  });
+
+  it('manages courses and enrollments across subjects, roles and workspaces', async () => {
+    const passwordHash = await bcrypt.hash('course-pass-123', 4);
+    const createUser = async (email: string, name: string) => prisma.user.create({ data: { email, displayName: name, passwordHash } });
+    const [admin, otherAdmin, teacher, secondTeacher, student, secondStudent, thirdStudent] = await Promise.all([
+      createUser('course-admin-e2e@mail.ru', 'Course Admin'),
+      createUser('course-other-admin-e2e@mail.ru', 'Other Admin'),
+      createUser('course-teacher-e2e@mail.ru', 'Course Teacher'),
+      createUser('course-second-teacher-e2e@mail.ru', 'Second Teacher'),
+      createUser('course-student-e2e@mail.ru', 'Course Student'),
+      createUser('course-second-student-e2e@mail.ru', 'Second Student'),
+      createUser('course-third-student-e2e@mail.ru', 'Third Student'),
+    ]);
+    const [a, b] = await Promise.all([
+      prisma.workspace.create({ data: { name: 'Course A', slug: 'course-a-e2e' } }),
+      prisma.workspace.create({ data: { name: 'Course B', slug: 'course-b-e2e' } }),
+    ]);
+    const member = (workspaceId: string, userId: string, role: 'admin' | 'teacher' | 'student') =>
+      prisma.workspaceMembership.create({ data: { workspaceId, userId, roles: { create: [{ role }] } } });
+    const [adminMember, teacherMember, studentMember] = await Promise.all([
+      member(a.id, admin.id, 'admin'), member(a.id, teacher.id, 'teacher'), member(a.id, student.id, 'student'),
+      member(a.id, secondTeacher.id, 'teacher'), member(a.id, secondStudent.id, 'student'), member(a.id, thirdStudent.id, 'student'),
+      member(b.id, otherAdmin.id, 'admin'), member(b.id, student.id, 'student'),
+    ]);
+    const subject = await prisma.subject.create({ data: { scopeKey: `w:${a.id}`, workspaceId: a.id, code: 'course-physics', name: 'Физика' } });
+    const program = await prisma.examProgram.create({ data: { scopeKey: `w:${a.id}`, workspaceId: a.id, subjectId: subject.id, code: 'course-ege-physics', examType: 'ege', variant: 'profile', name: 'ЕГЭ · физика' } });
+    const version = await prisma.programVersion.create({ data: { programId: program.id, period: '2027', revisionNumber: 1, status: 'published', publishedAt: new Date() } });
+    const draft = await prisma.programVersion.create({ data: { programId: program.id, period: '2028', revisionNumber: 1 } });
+    const login = async (email: string) => (await request(server).post('/api/v2/auth/login').send({ email, password: 'course-pass-123' }).expect(200)).body.session.token;
+    const [adminToken, otherToken, teacherToken, studentToken, secondToken] = await Promise.all([
+      login(admin.email), login(otherAdmin.email), login(teacher.email), login(student.email), login(secondStudent.email),
+    ]);
+    const headers = (token: string, role: string) => ({ ...auth(token), 'X-Active-Role': role });
+    const adminHeaders = headers(adminToken, 'admin');
+    const base = `/api/v2/workspaces/${a.id}/courses`;
+    const createBody = { programVersionId: version.id, title: 'Физика · группа А', defaultFormat: 'group', capacity: 2, startsOn: '2026-10-01', endsOn: '2027-06-01', timezone: 'Asia/Omsk', leadTeacherUserId: teacher.id };
+    await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'draft-denied').send({ ...createBody, programVersionId: draft.id }).expect(422);
+    await request(server).post(`/api/v2/workspaces/${b.id}/courses`).set(headers(otherToken, 'admin')).set('Idempotency-Key', 'foreign-program').send(createBody).expect(422);
+    const created = await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'course-a').send(createBody).expect(200);
+    const course = created.body.item;
+    expect(course).toMatchObject({ programVersionId: version.id, defaultFormat: 'group', status: 'draft', activeEnrollmentCount: 0, legacy: false });
+    await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'course-a').send(createBody).expect(200)
+      .expect(({ body }) => expect(body.item.id).toBe(course.id));
+    await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'course-a').send({ ...createBody, title: 'Other name' }).expect(409);
+    await prisma.idempotencyRecord.update({ where: { actorUserId_route_key: { actorUserId: admin.id, route: `courses:${a.id}`, key: 'course-a' } }, data: { expiresAt: new Date(0) } });
+    await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'course-a')
+      .send({ ...createBody, title: 'Физика · новый срок ключа' }).expect(200)
+      .expect(({ body }) => expect(body.item.id).not.toBe(course.id));
+    await request(server).post(base).set(headers(teacherToken, 'teacher')).set('Idempotency-Key', 'teacher-denied').send(createBody).expect(403);
+    await request(server).get(`${base}/${course.id}`).set(headers(otherToken, 'admin')).expect(404);
+    await request(server).get(`${base}/${course.id}`).set(headers(studentToken, 'student')).expect(404);
+    await request(server).get(base).set(headers(teacherToken, 'teacher')).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toContain(course.id));
+
+    const lead = (await request(server).get(`${base}/${course.id}/teachers`).set(adminHeaders).expect(200)).body.items[0];
+    await request(server).patch(`${base}/${course.id}/teachers/${lead.id}`).set(adminHeaders).set('If-Match', '0').send({ status: 'ended' }).expect(200);
+    await request(server).post(`${base}/${course.id}/activate`).set(adminHeaders).set('If-Match', '0').send({}).expect(409);
+    const replacement = await request(server).post(`${base}/${course.id}/teachers`).set(adminHeaders).set('Idempotency-Key', 'teacher-two').send({ teacherUserId: secondTeacher.id, role: 'lead' }).expect(200);
+    expect(replacement.body.item.role).toBe('lead');
+    await request(server).patch(`${base}/${course.id}/teachers/${replacement.body.item.id}`).set(adminHeaders).set('If-Match', '9').send({ role: 'assistant' }).expect(412);
+    const activated = await request(server).post(`${base}/${course.id}/activate`).set(adminHeaders).set('If-Match', '0').send({}).expect(200);
+    expect(activated.body.item.status).toBe('active');
+    const secondTeacherMember = await prisma.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: a.id, userId: secondTeacher.id } } });
+    await request(server).post(`/api/v2/workspaces/${a.id}/members/${secondTeacherMember.id}/roles/teacher/revoke`).set(adminHeaders).set('If-Match', '0')
+      .send({ reason: 'Передача курса другому преподавателю' }).expect(409);
+    await request(server).post(`/api/v2/workspaces/${a.id}/members/${secondTeacherMember.id}/suspend`).set(adminHeaders).set('If-Match', '0')
+      .send({ reason: 'Временная блокировка преподавателя' }).expect(409);
+    await request(server).post(`${base}/${course.id}/activate`).set(adminHeaders).set('If-Match', '0').send({}).expect(412);
+
+    const enroll = (userId: string, key: string) => request(server).post(`${base}/${course.id}/enrollments`).set(adminHeaders).set('Idempotency-Key', key)
+      .send({ studentUserId: userId, status: 'active', goal: 'Решать профильные задачи' });
+    const first = await enroll(student.id, 'first').expect(200);
+    const second = await enroll(secondStudent.id, 'second').expect(200);
+    expect(first.body.item.note).toBe('');
+    await enroll(thirdStudent.id, 'third').expect(409).expect(({ body }) => expect(body.code).toBe('course_full'));
+    await request(server).get(`${base}/${course.id}/enrollments`).set(headers(studentToken, 'student')).expect(200)
+      .expect(({ body }) => { expect(body.items).toHaveLength(1); expect(body.items[0].id).toBe(first.body.item.id); expect(body.items[0]).not.toHaveProperty('note'); });
+    await request(server).get(`${base}/${course.id}/enrollments/${second.body.item.id}`).set(headers(studentToken, 'student')).expect(404);
+    await request(server).get(`${base}/${course.id}`).set(headers(studentToken, 'student')).expect(200)
+      .expect(({ body }) => expect(body.item.activeEnrollmentCount).toBeNull());
+    await request(server).patch(`${base}/${course.id}/enrollments/${first.body.item.id}`).set(headers(studentToken, 'student')).set('If-Match', '0').send({ status: 'withdrawn' }).expect(403);
+    await request(server).patch(`${base}/${course.id}/enrollments/${first.body.item.id}`).set(adminHeaders).set('If-Match', '0').send({ status: 'withdrawn' }).expect(200);
+    await request(server).patch(`${base}/${course.id}/enrollments/${first.body.item.id}`).set(adminHeaders).set('If-Match', '0').send({ status: 'active' }).expect(412);
+    await request(server).get(`${base}/${course.id}`).set(headers(studentToken, 'student')).expect(404);
+    await enroll(thirdStudent.id, 'third-retry').expect(200);
+    await request(server).patch(`${base}/${course.id}`).set(adminHeaders).set('If-Match', '1').send({ capacity: 1 }).expect(409);
+    await request(server).patch(`${base}/${course.id}`).set(adminHeaders).set('If-Match', '0').send({ title: 'Физика · группа Б' }).expect(412);
+    const batchCourse = await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'batch-course')
+      .send({ ...createBody, title: 'Физика · набор Б' }).expect(200);
+    await request(server).post(`${base}/${batchCourse.body.item.id}/activate`).set(adminHeaders).set('If-Match', '0').send({}).expect(200);
+    const batchPath = `/api/v2/workspaces/${a.id}/enrollment-batches`;
+    const batchBody = { courseId: batchCourse.body.item.id, studentUserIds: [student.id, secondStudent.id, thirdStudent.id], status: 'active' };
+    await request(server).post(`${batchPath}/preview`).set(headers(teacherToken, 'teacher')).send(batchBody).expect(403);
+    await request(server).post(`/api/v2/workspaces/${b.id}/enrollment-batches/preview`).set(headers(otherToken, 'admin')).send(batchBody).expect(404);
+    const preview = await request(server).post(`${batchPath}/preview`).set(adminHeaders).send(batchBody).expect(200);
+    expect(preview.body).toMatchObject({ canApply: false, availableSeats: 2 });
+    expect(preview.body.items[2].reason).toContain('свободных мест');
+    await request(server).post(batchPath).set(adminHeaders).set('Idempotency-Key', 'batch-overflow').send(batchBody).expect(409);
+    expect(await prisma.enrollment.count({ where: { courseId: batchCourse.body.item.id } })).toBe(0);
+    const allowedBatch = { ...batchBody, studentUserIds: [student.id, secondStudent.id] };
+    await request(server).post(`${batchPath}/preview`).set(adminHeaders).send(allowedBatch).expect(200)
+      .expect(({ body }) => expect(body.canApply).toBe(true));
+    const applied = await request(server).post(batchPath).set(adminHeaders).set('Idempotency-Key', 'batch-two').send(allowedBatch).expect(200);
+    expect(applied.body.appliedCount).toBe(2);
+    await request(server).post(batchPath).set(adminHeaders).set('Idempotency-Key', 'batch-two').send(allowedBatch).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toEqual(applied.body.items.map((item: { id: string }) => item.id)));
+    await request(server).post(batchPath).set(adminHeaders).set('Idempotency-Key', 'batch-two').send(batchBody).expect(409);
+    const oneSeat = await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'one-seat')
+      .send({ ...createBody, title: 'Физика · один на пробу', capacity: 1 }).expect(200);
+    await request(server).post(`${base}/${oneSeat.body.item.id}/activate`).set(adminHeaders).set('If-Match', '0').send({}).expect(200);
+    const simultaneous = await Promise.all([student.id, secondStudent.id].map((userId, index) => request(server).post(`${base}/${oneSeat.body.item.id}/enrollments`)
+      .set(adminHeaders).set('Idempotency-Key', `last-seat-${index}`).send({ studentUserId: userId, status: 'active' })));
+    expect(simultaneous.map(result => result.status).sort()).toEqual([200, 409]);
+    expect(await prisma.enrollment.count({ where: { courseId: oneSeat.body.item.id, status: 'active' } })).toBe(1);
+    const archivedDraft = await request(server).post(base).set(adminHeaders).set('Idempotency-Key', 'archive-draft')
+      .send({ ...createBody, title: 'Физика · не состоялся' }).expect(200);
+    const archivedPath = `${base}/${archivedDraft.body.item.id}`;
+    const invitation = await request(server).post(`${archivedPath}/enrollments`).set(adminHeaders).set('Idempotency-Key', 'archive-invite')
+      .send({ studentUserId: student.id, status: 'invited' }).expect(200);
+    await request(server).post(`${archivedPath}/archive`).set(adminHeaders).set('If-Match', '0').send({}).expect(200);
+    await request(server).get(`${archivedPath}/enrollments/${invitation.body.item.id}`).set(adminHeaders).expect(200)
+      .expect(({ body }) => expect(body.item.status).toBe('withdrawn'));
+    await request(server).post(`${base}/${course.id}/pause`).set(adminHeaders).set('If-Match', '1').send({}).expect(200);
+    await prisma.programVersion.update({ where: { id: version.id }, data: { status: 'archived' } });
+    await request(server).post(`${base}/${course.id}/activate`).set(adminHeaders).set('If-Match', '2').send({}).expect(200);
+    expect(await prisma.workspaceAuditEvent.count({ where: { workspaceId: a.id, targetType: 'course' } })).toBeGreaterThanOrEqual(2);
+    await expect(prisma.courseTeacher.create({ data: { workspaceId: b.id, courseId: course.id, membershipId: teacherMember.id, role: 'assistant', startsOn: new Date('2026-10-01') } })).rejects.toThrow();
+    expect(adminMember.workspaceId).toBe(a.id);
+    expect(studentMember.workspaceId).toBe(a.id);
+    await request(server).get(base).set(headers(secondToken, 'student')).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toContain(course.id));
   });
 });
