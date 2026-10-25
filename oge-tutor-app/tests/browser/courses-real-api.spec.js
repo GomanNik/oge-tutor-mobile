@@ -7,12 +7,17 @@ async function assertNoHorizontalOverflow(page) {
     const previousScrollLeft = container.scrollLeft;
     container.scrollLeft = 0;
     document.documentElement.scrollLeft = 0;
-    const offenders = [...container.querySelectorAll('*')].map(element => ({
+    const dimensions = element => ({
       tag: element.tagName.toLowerCase(), className: typeof element.className === 'string' ? element.className : '',
       label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 35) || '',
-      right: Math.round(element.getBoundingClientRect().right),
-    })).filter(item => item.right > viewport + 1).sort((a, b) => b.right - a.right).slice(0, 8);
-    return { viewport, content: Math.max(document.documentElement.scrollWidth, container.scrollWidth), containerWidth: container.clientWidth, previousScrollLeft, offenders };
+      left: Math.round(element.getBoundingClientRect().left), right: Math.round(element.getBoundingClientRect().right),
+      clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+      overflowX: getComputedStyle(element).overflowX,
+    });
+    const elements = [...document.querySelectorAll('*')];
+    const offenders = elements.map(dimensions).filter(item => item.right > viewport + 1).sort((a, b) => b.right - a.right).slice(0, 8);
+    const scrollable = elements.map(dimensions).filter(item => item.scrollWidth > item.clientWidth + 1).sort((a, b) => b.scrollWidth - b.clientWidth - (a.scrollWidth - a.clientWidth)).slice(0, 12);
+    return { viewport, content: Math.max(document.documentElement.scrollWidth, container.scrollWidth), containerWidth: container.clientWidth, previousScrollLeft, roots: [document.documentElement, document.body, document.getElementById('root'), container].map(dimensions), offenders, scrollable };
   });
   expect(widths.content, JSON.stringify(widths)).toBeLessThanOrEqual(widths.viewport + 1);
 }
