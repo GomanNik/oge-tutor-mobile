@@ -27,6 +27,6 @@ For the full stack, copy `.env.example` to `.env` and run `docker compose up -d 
 
 See [frontend setup](oge-tutor-app/README.md), [backend setup](oge-tutor-backend/README.md), [current HTTP API](docs/api.md), [environment variables](docs/env.md), and [deployment](docs/deployment.md).
 
-The [multi-subject and group-learning platform design](docs/platform/README.md) describes the roadmap. Blocks 1–4 in `main` provide workspace identity, catalog, courses, enrollments and group lessons under `/api/v2`. The [Block 5 contract](docs/platform/block-5-works-and-files.md) covers assignments, submissions, reviews, materials and files in the current branch. It is not deployed until its PR is accepted. See the [block 1 runbook](docs/platform/block-1-operations.md) for bootstrap and migration checks.
+The [multi-subject and group-learning platform design](docs/platform/README.md) describes the roadmap. Blocks 1–5 in `main` provide workspace identity, catalog, courses, enrollments, group lessons, assignments, reviews, materials and files under `/api/v2`. The [Block 6 contract](docs/platform/block-6-progress-notifications.md) covers enrollment progress and addressed notifications in the current branch. See the [block 1 runbook](docs/platform/block-1-operations.md) for bootstrap and migration checks.
 
 Before changing a running stack, create and verify a [database and uploads backup](docs/backups.md).
