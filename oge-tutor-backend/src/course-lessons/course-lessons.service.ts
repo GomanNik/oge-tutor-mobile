@@ -163,11 +163,17 @@ export class CourseLessonsService {
   }
 
   private async mutate<T>(action: (tx: Tx) => Promise<T>): Promise<T> {
-    try { return await this.prisma.$transaction(action, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
-    catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw conflict('concurrent_update', 'Параллельное изменение расписания. Повторите запрос.');
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw conflict('duplicate_link', 'Запись уже существует.');
-      throw error;
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.prisma.$transaction(action, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
+      catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
+          continue;
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw conflict('concurrent_update', 'Параллельное изменение расписания. Повторите запрос.');
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw conflict('duplicate_link', 'Запись уже существует.');
+        throw error;
+      }
     }
   }
 

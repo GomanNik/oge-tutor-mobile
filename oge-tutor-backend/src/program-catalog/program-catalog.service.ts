@@ -95,12 +95,20 @@ export class ProgramCatalogService {
 
   private async mutate<T>(actor: Actor, owner: Owner, action: (tx: Prisma.TransactionClient) => Promise<T>) {
     await this.assertManager(actor, owner);
-    try {
-      return await this.prisma.$transaction(async tx => {
-        await this.managerInTx(tx, actor, owner.workspaceId);
-        return action(tx);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    } catch (error) { normalizeError(error); }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction(async tx => {
+          await this.managerInTx(tx, actor, owner.workspaceId);
+          return action(tx);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
+          continue;
+        }
+        normalizeError(error);
+      }
+    }
   }
 
   private async createOnce<T>(actor: Actor, owner: Owner, route: string, key: string, body: unknown, action: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
