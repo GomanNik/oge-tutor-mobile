@@ -238,6 +238,12 @@ jobs:
       REAL_API_PASSWORD: BrowserSmoke-CI-2026!
       COURSE_REAL_API_EMAIL: teacher@mail.ru
       COURSE_REAL_API_PASSWORD: BrowserCourse-CI-2026!
+      LESSON_REAL_API_EMAIL: teacher@mail.ru
+      LESSON_REAL_API_PASSWORD: BrowserCourse-CI-2026!
+      LESSON_REAL_API_STUDENT_EMAIL: ivan@mail.ru
+      LESSON_REAL_API_STUDENT_PASSWORD: BrowserCourse-CI-2026!
+      LESSON_REAL_API_STUDENT_A_NAME: Иван Петров
+      LESSON_REAL_API_STUDENT_B_NAME: Мария Соколова
       WORKSPACE_ADMIN_EMAIL: browser-admin@test.local
       WORKSPACE_ADMIN_PASSWORD: BrowserSmoke-CI-2026!
       WORKSPACE_ADMIN_NAME: Browser Admin

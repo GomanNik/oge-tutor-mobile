@@ -1,6 +1,6 @@
 # HTTP API
 
-This page describes the **currently implemented API**. Workspace identity, administration, the exam catalog, and course/roster management are implemented under `/api/v2`. Group lessons and assignments in [platform/api-target.md](platform/api-target.md) remain future design.
+This page describes the **currently implemented API**. Workspace identity, administration, the exam catalog, courses/rosters and group lessons are implemented under `/api/v2`. Assignments and recurring lesson series in [platform/api-target.md](platform/api-target.md) remain future design.
 
 The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. The legacy routes below have no `/api` prefix; new workspace routes use `/api/v2`. Protected calls use `Authorization: Bearer <JWT>`; health, login, password-reset, access-token verification/completion and v2 invitation acceptance for a new account are public. Rate limits apply to public authentication routes.
 
@@ -31,7 +31,24 @@ Catalog lists return `{items,total,page,pageSize}` with bounded pagination. Crea
 
 `GET/POST /api/v2/workspaces/:workspaceId/courses`, `GET/PATCH /courses/:id` and `POST /courses/:id/{activate,pause,complete,archive}` manage one course per published program version. `GET/POST /courses/:id/teachers`, `PATCH /courses/:id/teachers/:linkId`, `GET/POST /courses/:id/enrollments` and `GET/PATCH /courses/:id/enrollments/:enrollmentId` manage named teachers and individual participation. `POST /api/v2/workspaces/:workspaceId/enrollment-batches/preview` checks 1–50 students without writing, and `POST /enrollment-batches` applies all or none. These paths all use Bearer and `X-Active-Role`.
 
-Administrators manage the roster; assigned teachers read their own course; students read only their own active/paused/completed participation and never a classmate's row. New and batch creates require `Idempotency-Key`; PATCH and course state transitions require `If-Match`. List pages are `{items,total,page,pageSize}`. Legacy pairs appear as read-only individual courses while lessons, homework and progress remain on v1. See the [block 3 contract and migration notes](platform/block-3-courses.md).
+Administrators manage the roster; assigned teachers read their own course; students read only their own active/paused/completed participation and never a classmate's row. New and batch creates require `Idempotency-Key`; PATCH and course state transitions require `If-Match`. List pages are `{items,total,page,pageSize}`. Legacy pairs appear as read-only individual courses while their lessons are now visible in the v2 calendar; legacy lesson edits, homework and progress remain on v1. See the [block 3 contract and migration notes](platform/block-3-courses.md).
+
+## Course lessons and calendar v2 (Block 4)
+
+All routes below start with `/api/v2/workspaces/:workspaceId/lessons` and require Bearer auth and `X-Active-Role`. Administrators schedule within their workspace; assigned teachers schedule in their courses; students read only lessons where their active/paused/completed enrollment is an explicit participant. A student's response contains only their own participant row and excludes team notes.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /lessons?from=&to=&courseId=&page=&pageSize=` | Calendar range (inclusive start, exclusive end, at most 90 days), scoped before pagination. Admins may also filter `teacherUserId` and `studentUserId`. |
+| `GET /lessons/:id` | Scoped lesson detail. |
+| `POST /lessons/preview` | Validate a proposed lesson and report conflicting teacher/student IDs; does not reserve time. |
+| `POST /lessons` | Atomically schedule a one-off group or individual lesson. Requires `Idempotency-Key`. |
+| `PATCH /lessons/:id` | Edit topic, time, timezone, format, team note or explicit teachers/participants; requires `If-Match`. |
+| `POST /lessons/:id/cancel` | Cancel a planned lesson with a reason and audit event; requires `If-Match`. |
+| `POST /lessons/:id/complete` | Mark a started lesson complete, with one attendance status (`present`, `absent`, `excused`) for every participant; requires `If-Match`. |
+| `POST /lessons/:id/attendance-corrections` | Change one completed lesson's attendance with a reason and before/after audit; requires `If-Match`. |
+
+Creates and updates validate active teacher assignments, active enrollments, course and assignment dates, IANA timezone, a 15–480 minute interval and all selected people's calendars across courses and workspaces. Adjacent half-open intervals do not conflict. A group course can host a one-student consultation; an individual course cannot host a group. Preview is advisory; the mutation rechecks conflicts under a serializable transaction and person locks. A conflicting or concurrent request returns `409`. Legacy lesson IDs/times are preserved and their v2 snapshots are read-only; v1 writes keep both models in sync. The full contract, migration and acceptance criteria are in [block 4](platform/block-4-lessons.md).
 
 ## Response Contract
 
