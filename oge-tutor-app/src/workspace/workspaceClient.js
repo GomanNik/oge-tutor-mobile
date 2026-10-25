@@ -45,6 +45,38 @@ export function createWorkspaceClient() {
     return `${path}${encoded ? `?${encoded}` : ''}`;
   }
 
+  function workPath(context, resource, id, suffix = '') {
+    return pathFor(context, `/${resource}${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`);
+  }
+
+  function workQuery(context, resource, query = {}) {
+    const params = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== ''));
+    return `${workPath(context, resource)}${params.size ? `?${params}` : ''}`;
+  }
+
+  async function workFileRequest(context, file, download = false) {
+    const headers = { Authorization: `Bearer ${token}`, 'X-Active-Role': context.role };
+    const response = await fetch(`${baseUrl()}/api/v2${workPath(context, 'files', download ? file.id : null, download ? '/download' : '')}`, {
+      method: download ? 'GET' : 'POST', headers,
+      body: download ? undefined : (() => { const form = new FormData(); form.append('file', file); return form; })(),
+    });
+    if (response.status === 401) setToken('');
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const error = new Error(payload?.message || 'Не удалось обработать файл.');
+      error.status = response.status;
+      error.code = payload?.code || 'http_error';
+      throw error;
+    }
+    if (!download) return response.json();
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = file.originalName || 'file';
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   return {
     hasToken: () => Boolean(token),
     clearToken: () => setToken(''),
@@ -92,6 +124,29 @@ export function createWorkspaceClient() {
     cancelLesson: (context, lesson, reason) => request(pathFor(context, `/lessons/${encodeURIComponent(lesson.id)}/cancel`), { method: 'POST', context, revision: lesson.revision, body: { reason } }),
     completeLesson: (context, lesson, body) => request(pathFor(context, `/lessons/${encodeURIComponent(lesson.id)}/complete`), { method: 'POST', context, revision: lesson.revision, body }),
     correctLessonAttendance: (context, lesson, body) => request(pathFor(context, `/lessons/${encodeURIComponent(lesson.id)}/attendance-corrections`), { method: 'POST', context, revision: lesson.revision, body }),
+    assignments: (context, query) => request(workQuery(context, 'assignments', query), { context }),
+    assignment: (context, id) => request(workPath(context, 'assignments', id), { context }),
+    createAssignment: (context, body) => request(workPath(context, 'assignments'), { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body }),
+    updateAssignment: (context, item, body) => request(workPath(context, 'assignments', item.id), { method: 'PATCH', context, revision: item.revision, body }),
+    publishAssignment: (context, item, ids, add = false) => request(workPath(context, 'assignments', item.id, add ? '/recipients' : '/publish'), { method: 'POST', context, revision: item.revision, idempotencyKey: crypto.randomUUID(), body: { recipientEnrollmentIds: ids } }),
+    assignmentAction: (context, item, action, reason) => request(workPath(context, 'assignments', item.id, `/${action}`), { method: 'POST', context, revision: item.revision, body: { reason } }),
+    assignmentRecipients: (context, id, query) => request(`${workPath(context, 'assignments', id, '/recipients')}?${new URLSearchParams(query)}`, { context }),
+    updateAssignmentRecipient: (context, assignmentId, item, body) => request(workPath(context, 'assignments', assignmentId, `/recipients/${encodeURIComponent(item.id)}`), { method: 'PATCH', context, revision: item.revision, body }),
+    submissions: (context, recipientId, query) => request(`${workPath(context, 'assignment-recipients', recipientId, '/submissions')}?${new URLSearchParams(query)}`, { context }),
+    submitAssignment: (context, recipient, body) => request(workPath(context, 'assignment-recipients', recipient.id, '/submissions'), { method: 'POST', context, revision: recipient.revision, idempotencyKey: crypto.randomUUID(), body }),
+    createReview: (context, submissionId, recipientRevision, body) => request(workPath(context, 'submissions', submissionId, '/reviews'), { method: 'POST', context, revision: recipientRevision, idempotencyKey: crypto.randomUUID(), body }),
+    updateReview: (context, review, body) => request(workPath(context, 'reviews', review.id), { method: 'PATCH', context, revision: review.revision, body }),
+    publishReview: (context, review) => request(workPath(context, 'reviews', review.id, '/publish'), { method: 'POST', context, revision: review.revision, idempotencyKey: crypto.randomUUID(), body: {} }),
+    learningMaterials: (context, query) => request(workQuery(context, 'materials', query), { context }),
+    learningMaterial: (context, id) => request(workPath(context, 'materials', id), { context }),
+    createLearningMaterial: (context, body) => request(workPath(context, 'materials'), { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body }),
+    updateLearningMaterial: (context, item, body) => request(workPath(context, 'materials', item.id), { method: 'PATCH', context, revision: item.revision, body }),
+    publishLearningMaterial: (context, item, body) => request(workPath(context, 'materials', item.id, '/publish'), { method: 'POST', context, revision: item.revision, idempotencyKey: crypto.randomUUID(), body }),
+    revokeLearningMaterial: (context, item, publication, reason) => request(workPath(context, 'materials', item.id, `/publications/${encodeURIComponent(publication.id)}/revoke`), { method: 'POST', context, revision: publication.revision, body: { reason } }),
+    archiveLearningMaterial: (context, item, reason) => request(workPath(context, 'materials', item.id, '/archive'), { method: 'POST', context, revision: item.revision, body: { reason } }),
+    uploadWorkFile: (context, file) => workFileRequest(context, file),
+    downloadWorkFile: (context, file) => workFileRequest(context, file, true),
+    deleteWorkFile: (context, id) => request(workPath(context, 'files', id), { method: 'DELETE', context }),
     subjects: (context, query) => request(catalogPath('/subjects', context, query), { context }),
     createSubject: (context, body) => request('/subjects', { method: 'POST', context, idempotencyKey: crypto.randomUUID(), body: { ...(context ? { workspaceId: context.workspaceId } : {}), ...body } }),
     updateSubject: (context, item, name) => request(`/subjects/${encodeURIComponent(item.id)}`, { method: 'PATCH', context, revision: item.revision, body: { name } }),

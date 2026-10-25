@@ -3,6 +3,7 @@ import { createWorkspaceClient } from './workspaceClient.js';
 import CatalogPanel from './CatalogPanel.jsx';
 import CoursesPanel from './CoursesPanel.jsx';
 import LessonsPanel from './LessonsPanel.jsx';
+import AssignmentsPanel from './AssignmentsPanel.jsx';
 
 const MODE_KEY = 'oge-tutor-workspace-context';
 const ROLES = ['admin', 'teacher', 'student'];
@@ -260,7 +261,6 @@ export default function WorkspaceApp({ onLegacy }) {
     const key = `${context.workspaceId}:${context.role}`;
     setSelectedKey(key); window.sessionStorage.setItem(MODE_KEY, key);
     setView('home');
-    if (context.legacyRole === context.role) onLegacy();
   }
 
   const choices = contexts.flatMap(context => context.roles.map(role => ({ workspaceId: context.workspaceId, name: context.name, legacyRole: context.legacyRole, role })));
@@ -273,13 +273,13 @@ export default function WorkspaceApp({ onLegacy }) {
   if (!me) return <Login onLogin={(email, password) => { void login(email, password).catch(() => {}); }} busy={busy} error={error} />;
   return <div className="workspace-page">
     <header className="workspace-header"><div><span className="workspace-mark">OGE Tutor</span><strong>{activeView === 'globalCatalog' ? 'Общий каталог' : current?.name || 'Кабинет'}</strong></div><div className="workspace-header-actions">
-      {context && <div className="workspace-view-nav">{context.role === 'admin' && <button type="button" aria-current={activeView === 'home' ? 'page' : undefined} onClick={() => setView('home')}>Кабинет</button>}<button type="button" aria-current={activeView === 'courses' || (activeView === 'home' && context.role !== 'admin') ? 'page' : undefined} onClick={() => setView('courses')}>Курсы</button><button type="button" aria-current={activeView === 'lessons' ? 'page' : undefined} onClick={() => setView('lessons')}>Расписание</button><button type="button" aria-current={activeView === 'catalog' ? 'page' : undefined} onClick={() => setView('catalog')}>Каталог</button></div>}
+      {context && <div className="workspace-view-nav">{context.role === 'admin' && <button type="button" aria-current={activeView === 'home' ? 'page' : undefined} onClick={() => setView('home')}>Кабинет</button>}<button type="button" aria-current={activeView === 'courses' || (activeView === 'home' && context.role !== 'admin') ? 'page' : undefined} onClick={() => setView('courses')}>Курсы</button><button type="button" aria-current={activeView === 'lessons' ? 'page' : undefined} onClick={() => setView('lessons')}>Расписание</button><button type="button" aria-current={activeView === 'assignments' ? 'page' : undefined} onClick={() => setView('assignments')}>Работы</button><button type="button" aria-current={activeView === 'catalog' ? 'page' : undefined} onClick={() => setView('catalog')}>Каталог</button></div>}
       {me.catalogManage && <button type="button" aria-current={activeView === 'globalCatalog' ? 'page' : undefined} onClick={() => setView('globalCatalog')}>Общий каталог</button>}
       {choices.length > 0 && <label>Контекст<select aria-label="Рабочее пространство и роль" value={current ? `${current.workspaceId}:${current.role}` : ''} onChange={event => { const choice = choices.find(item => `${item.workspaceId}:${item.role}` === event.target.value); if (choice) select(choice); }}>
         {choices.map(choice => <option key={`${choice.workspaceId}:${choice.role}`} value={`${choice.workspaceId}:${choice.role}`}>{choice.name} · {ROLE_LABELS[choice.role]}</option>)}
       </select></label>}
       <button type="button" onClick={logout}>Выйти</button>
     </div></header>
-    {contextRefreshing ? <main className="workspace-empty"><p>Обновляем доступ…</p></main> : activeView === 'globalCatalog' && me.catalogManage ? <CatalogPanel key="global" api={api} context={null} canManage onAccessError={onAccessError} /> : activeView === 'catalog' && context ? <CatalogPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} /> : activeView === 'lessons' && context ? <LessonsPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : context && (activeView === 'courses' || (activeView === 'home' && context.role !== 'admin')) ? <CoursesPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} legacyRole={current?.legacyRole} onLegacy={onLegacy} /> : context?.role === 'admin' ? <AdminPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : <main className="workspace-empty"><h1>Нет доступных пространств</h1></main>}
+    {contextRefreshing ? <main className="workspace-empty"><p>Обновляем доступ…</p></main> : activeView === 'globalCatalog' && me.catalogManage ? <CatalogPanel key="global" api={api} context={null} canManage onAccessError={onAccessError} /> : activeView === 'catalog' && context ? <CatalogPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} /> : activeView === 'lessons' && context ? <LessonsPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : activeView === 'assignments' && context ? <AssignmentsPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : context && (activeView === 'courses' || (activeView === 'home' && context.role !== 'admin')) ? <CoursesPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} legacyRole={current?.legacyRole} onLegacy={onLegacy} /> : context?.role === 'admin' ? <AdminPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : <main className="workspace-empty"><h1>Нет доступных пространств</h1></main>}
   </div>;
 }
