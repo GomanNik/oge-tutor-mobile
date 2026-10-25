@@ -21,6 +21,11 @@ type EnrollmentRow = Prisma.EnrollmentGetPayload<{ include: typeof enrollmentInc
 const revisionError = () => new AppError(412, 'revision_mismatch', 'Запись изменилась. Обновите страницу.');
 const conflict = (code: string, message: string) => new AppError(409, code, message);
 const day = (value: Date) => value.toISOString().slice(0, 10);
+const dayInZone = (value: Date, timezone: string) => {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value);
+  const part = (type: string) => parts.find(item => item.type === type)!.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
 const today = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
 const date = (value: string) => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -211,6 +216,14 @@ export class CoursesService {
       }
       const endsOn = body.endsOn ? date(body.endsOn) : undefined;
       if (endsOn && endsOn < course.startsOn) throw validationError('Дата окончания раньше начала.');
+      if (endsOn) {
+        const latest = await tx.lesson.findFirst({
+          where: { courseId: id, status: { in: ['planned', 'rescheduled', 'completed'] } },
+          orderBy: { endAt: 'desc' }, select: { endAt: true },
+        });
+        if (latest && dayInZone(new Date(latest.endAt.getTime() - 1), course.timezone) > day(endsOn))
+          throw conflict('lessons_after_course_end', 'Новая дата окончания раньше уже назначенного или проведённого урока.');
+      }
       const updated = await tx.course.updateMany({ where: { id, revision }, data: {
         ...(body.title !== undefined ? { title: body.title.trim() } : {}),
         ...(body.capacity !== undefined ? { capacity: body.capacity } : {}),
@@ -231,6 +244,8 @@ export class CoursesService {
         activate: ['draft', 'paused'], pause: ['active'], complete: ['active', 'paused'], archive: ['draft', 'completed'],
       };
       if (!allowed[action].includes(course.status)) throw conflict('invalid_state', 'Недопустимый переход курса.');
+      if (action === 'complete' && await tx.lesson.count({ where: { courseId: id, status: { in: ['planned', 'rescheduled'] }, endAt: { gt: new Date() } } }))
+        throw conflict('future_lessons', 'Перед завершением курса отмените или проведите будущие занятия.');
       if (action === 'activate') {
         const lead = await tx.courseTeacher.count({ where: { courseId: id, role: 'lead', status: 'active', membership: { status: 'active', roles: { some: { role: 'teacher', revokedAt: null } } } } });
         if (!lead) throw conflict('missing_lead', 'Для активации нужен действующий ведущий преподаватель.');
@@ -276,6 +291,8 @@ export class CoursesService {
       if (current.revision !== revision) throw revisionError();
       if (current.status !== 'active' || (!body.role && !body.status)) throw conflict('invalid_state', 'Назначение нельзя изменить.');
       if (body.status && body.status !== 'ended') throw validationError('Завершённое назначение создаётся заново.');
+      if (body.status === 'ended' && await tx.lessonTeacher.count({ where: { courseTeacherId: linkId, lesson: { status: { in: ['planned', 'rescheduled'] }, endAt: { gt: new Date() } } } }))
+        throw conflict('future_lessons', 'Сначала замените преподавателя в будущих занятиях.');
       if (current.role === 'lead' && (body.role && body.role !== 'lead' || body.status === 'ended') && ['active', 'paused'].includes(course.status)) {
         const leads = await tx.courseTeacher.count({ where: { courseId, role: 'lead', status: 'active', membership: { status: 'active', roles: { some: { role: 'teacher', revokedAt: null } } } } });
         if (leads <= 1) throw conflict('last_lead', 'Нельзя снять последнего ведущего действующего курса.');
@@ -335,6 +352,9 @@ export class CoursesService {
         invited: ['active', 'withdrawn'], active: ['paused', 'completed', 'withdrawn'], paused: ['active', 'completed', 'withdrawn'], completed: [], withdrawn: [],
       };
       if (body.status && !transitions[current.status].includes(body.status)) throw conflict('invalid_state', 'Недопустимый переход зачисления.');
+      if (body.status && ['paused', 'completed', 'withdrawn'].includes(body.status)
+        && await tx.lessonParticipant.count({ where: { enrollmentId: id, lesson: { status: { in: ['planned', 'rescheduled'] }, endAt: { gt: new Date() } } } }))
+        throw conflict('future_lessons', 'Сначала измените состав будущих занятий.');
       if (body.status === 'active') {
         if (course.status !== 'active') throw conflict('course_not_active', 'Курс не активен.');
         await this.activeMember(tx, ctx, (await tx.workspaceMembership.findUniqueOrThrow({ where: { id: current.membershipId } })).userId, 'student');

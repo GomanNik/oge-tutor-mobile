@@ -246,11 +246,13 @@ async function upsertTopicAttachment(tx: any, teacherId: string, taskNumber: num
 }
 
 async function upsertLesson(tx: any, teacherId: string, studentId: string, input: any) {
+  const mapping = await tx.legacyCourseMapping.findUniqueOrThrow({ where: { studentProfileId: studentId } });
   const existing = await tx.lesson.findFirst({
     where: { teacherId, studentId, topic: input.topic, source: LESSON_SOURCE.MANUAL },
   });
 
   const data = {
+    courseId: mapping.courseId,
     teacherId,
     studentId,
     topic: input.topic,
@@ -267,8 +269,20 @@ async function upsertLesson(tx: any, teacherId: string, studentId: string, input
     materials: input.materials || [],
   };
 
-  if (existing) return tx.lesson.update({ where: { id: existing.id }, data });
-  return tx.lesson.create({ data });
+  const lesson = existing
+    ? await tx.lesson.update({ where: { id: existing.id }, data })
+    : await tx.lesson.create({ data });
+  await tx.lessonTeacher.upsert({
+    where: { lessonId_courseTeacherId: { lessonId: lesson.id, courseTeacherId: `legacy-course-teacher-${studentId}` } },
+    update: {},
+    create: { lessonId: lesson.id, courseId: mapping.courseId, courseTeacherId: `legacy-course-teacher-${studentId}` },
+  });
+  await tx.lessonParticipant.upsert({
+    where: { lessonId_enrollmentId: { lessonId: lesson.id, enrollmentId: mapping.enrollmentId } },
+    update: {},
+    create: { lessonId: lesson.id, courseId: mapping.courseId, enrollmentId: mapping.enrollmentId, responseStatus: 'accepted' },
+  });
+  return lesson;
 }
 
 async function upsertHomework(tx: any, teacherId: string, studentId: string, input: any) {

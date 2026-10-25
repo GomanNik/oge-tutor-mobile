@@ -167,6 +167,12 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(update?.responses).toHaveProperty('412');
     expect(update?.responses).toHaveProperty('428');
     expect(update?.parameters?.some(parameter => !('$ref' in parameter) && parameter.name === 'If-Match' && parameter.required)).toBe(true);
+    const lessonCreate = document.paths['/api/v2/workspaces/{workspaceId}/lessons'].post;
+    const lessonCancel = document.paths['/api/v2/workspaces/{workspaceId}/lessons/{id}/cancel'].post;
+    expect(lessonCreate?.parameters?.some(parameter => !('$ref' in parameter) && parameter.name === 'Idempotency-Key' && parameter.required)).toBe(true);
+    expect(lessonCancel?.parameters?.some(parameter => !('$ref' in parameter) && parameter.name === 'If-Match' && parameter.required)).toBe(true);
+    expect(lessonCancel?.responses).toHaveProperty('412');
+    expect(lessonCancel?.responses).toHaveProperty('428');
   });
 
   it('runs auth, bootstrap, invite, lesson, homework, file and reset flows through HTTP', async () => {
@@ -1223,5 +1229,129 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(studentMember.workspaceId).toBe(a.id);
     await request(server).get(base).set(headers(secondToken, 'student')).expect(200)
       .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toContain(course.id));
+  });
+
+  it('schedules group and individual lessons with cross-course conflicts, attendance, privacy and history', async () => {
+    const passwordHash = await bcrypt.hash('lessons-pass-123', 4);
+    const createUser = (email: string, displayName: string) => prisma.user.create({ data: { email, displayName, passwordHash } });
+    const [admin, teacherA, teacherB, studentA, studentB, studentC, outsider] = await Promise.all([
+      createUser('lessons-admin-e2e@mail.ru', 'Lessons Admin'), createUser('lessons-teacher-a-e2e@mail.ru', 'Teacher A'),
+      createUser('lessons-teacher-b-e2e@mail.ru', 'Teacher B'), createUser('lessons-student-a-e2e@mail.ru', 'Student A'),
+      createUser('lessons-student-b-e2e@mail.ru', 'Student B'), createUser('lessons-student-c-e2e@mail.ru', 'Student C'),
+      createUser('lessons-outsider-e2e@mail.ru', 'Outsider'),
+    ]);
+    const workspace = await prisma.workspace.create({ data: { name: 'Lessons Workspace', slug: 'lessons-e2e', timezone: 'UTC' } });
+    const other = await prisma.workspace.create({ data: { name: 'Other Lessons Workspace', slug: 'lessons-other-e2e', timezone: 'UTC' } });
+    const member = (workspaceId: string, userId: string, role: 'admin' | 'teacher' | 'student') =>
+      prisma.workspaceMembership.create({ data: { workspaceId, userId, roles: { create: [{ role }] } } });
+    const [adminMember, teacherAMember, teacherBMember, studentAMember, studentBMember, studentCMember] = await Promise.all([
+      member(workspace.id, admin.id, 'admin'), member(workspace.id, teacherA.id, 'teacher'), member(workspace.id, teacherB.id, 'teacher'),
+      member(workspace.id, studentA.id, 'student'), member(workspace.id, studentB.id, 'student'), member(workspace.id, studentC.id, 'student'),
+      member(other.id, outsider.id, 'admin'),
+    ]);
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const plus = (days: number, hour: number) => new Date(today.getTime() + days * 86400000 + hour * 3600000);
+    const programVersion = await prisma.programVersion.findUniqueOrThrow({ where: { id: 'legacy-version-oge-math' } });
+    const makeCourse = (title: string, defaultFormat: 'individual' | 'group') => prisma.course.create({ data: {
+      workspaceId: workspace.id, programVersionId: programVersion.id, title, defaultFormat, capacity: 5,
+      startsOn: today, endsOn: plus(60, 0), timezone: 'UTC', status: 'active',
+    } });
+    const [group, secondCourse, thirdCourse] = await Promise.all([
+      makeCourse('Math Group', 'group'), makeCourse('Second Subject', 'group'), makeCourse('Teacher Conflict', 'group'),
+    ]);
+    const teacherLink = (courseId: string, membershipId: string) => prisma.courseTeacher.create({ data: {
+      workspaceId: workspace.id, courseId, membershipId, role: 'lead', startsOn: today,
+    } });
+    const enroll = (courseId: string, membershipId: string) => prisma.enrollment.create({ data: {
+      workspaceId: workspace.id, courseId, membershipId, status: 'active', startsOn: today,
+    } });
+    const [groupTeacher, secondTeacher, thirdTeacher, groupStudentA, groupStudentB, secondStudentA, thirdStudentC] = await Promise.all([
+      teacherLink(group.id, teacherAMember.id), teacherLink(secondCourse.id, teacherBMember.id), teacherLink(thirdCourse.id, teacherAMember.id),
+      enroll(group.id, studentAMember.id), enroll(group.id, studentBMember.id), enroll(secondCourse.id, studentAMember.id), enroll(thirdCourse.id, studentCMember.id),
+    ]);
+    const login = async (email: string) => (await request(server).post('/api/v2/auth/login').send({ email, password: 'lessons-pass-123' }).expect(200)).body.session.token;
+    const [adminToken, teacherToken, studentAToken, studentBToken, outsiderToken] = await Promise.all([
+      login(admin.email), login(teacherA.email), login(studentA.email), login(studentB.email), login(outsider.email),
+    ]);
+    const headers = (token: string, role: string) => ({ ...auth(token), 'X-Active-Role': role });
+    const adminHeaders = headers(adminToken, 'admin');
+    const path = `/api/v2/workspaces/${workspace.id}/lessons`;
+    const slot = (days: number, hour: number) => ({ startAt: plus(days, hour).toISOString(), endAt: plus(days, hour + 1).toISOString() });
+    const zoneCourse = await prisma.course.create({ data: {
+      workspaceId: workspace.id, programVersionId: programVersion.id, title: 'Timezone boundary', defaultFormat: 'group', capacity: 2,
+      startsOn: today, endsOn: plus(1, 0), timezone: 'Asia/Omsk', status: 'active',
+    } });
+    const [zoneTeacher, zoneStudent] = await Promise.all([teacherLink(zoneCourse.id, teacherAMember.id), enroll(zoneCourse.id, studentBMember.id)]);
+    await request(server).post(`${path}/preview`).set(adminHeaders).send({
+      courseId: zoneCourse.id, topic: 'Outside course local date', ...slot(1, 21), timezone: 'UTC', format: 'individual',
+      teacherLinkIds: [zoneTeacher.id], participantEnrollmentIds: [zoneStudent.id],
+    }).expect(422);
+    const groupBody = { courseId: group.id, topic: 'Equations', ...slot(3, 12), timezone: 'UTC', format: 'group',
+      teacherLinkIds: [groupTeacher.id], participantEnrollmentIds: [groupStudentA.id, groupStudentB.id], note: 'Private team note' };
+    await request(server).post(path).set(adminHeaders).send(groupBody).expect(400);
+    await request(server).post(`${path}/preview`).set(headers(studentAToken, 'student')).send(groupBody).expect(403);
+    await request(server).post(`${path}/preview`).set(adminHeaders).send(groupBody).expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ canCreate: true, participantCount: 2, teacherCount: 1 }));
+    const created = await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'group-one').send(groupBody).expect(200);
+    const lessonId = created.body.item.id;
+    expect(created.body.item).toMatchObject({ courseId: group.id, format: 'group', status: 'planned', revision: 0 });
+    await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'group-one').send(groupBody).expect(200)
+      .expect(({ body }) => expect(body.item.id).toBe(lessonId));
+    await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'group-one').send({ ...groupBody, topic: 'Different' }).expect(409);
+    const sameStudent = { ...groupBody, courseId: secondCourse.id, teacherLinkIds: [secondTeacher.id], participantEnrollmentIds: [secondStudentA.id] };
+    await request(server).post(`${path}/preview`).set(adminHeaders).send(sameStudent).expect(200)
+      .expect(({ body }) => expect(body.conflicts).toContainEqual({ userId: studentA.id, kind: 'student' }));
+    await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'student-conflict').send(sameStudent).expect(409);
+    const sameTeacher = { ...groupBody, courseId: thirdCourse.id, teacherLinkIds: [thirdTeacher.id], participantEnrollmentIds: [thirdStudentC.id] };
+    await request(server).post(`${path}/preview`).set(adminHeaders).send(sameTeacher).expect(200)
+      .expect(({ body }) => expect(body.conflicts).toContainEqual({ userId: teacherA.id, kind: 'teacher' }));
+    await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'teacher-conflict').send(sameTeacher).expect(409);
+    await request(server).get(`${path}/${lessonId}`).set(headers(outsiderToken, 'admin')).expect(404);
+    await request(server).get(`${path}/${lessonId}`).set(headers(studentAToken, 'student')).expect(200).expect(({ body }) => {
+      expect(body.item.participants).toHaveLength(1);
+      expect(body.item.participants[0]).not.toHaveProperty('userId');
+      expect(body.item).not.toHaveProperty('note');
+    });
+    const range = `from=${encodeURIComponent(plus(2, 0).toISOString())}&to=${encodeURIComponent(plus(10, 0).toISOString())}`;
+    await request(server).get(`${path}?${range}`).set(headers(studentBToken, 'student')).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).toContain(lessonId));
+    const consultation = { ...groupBody, topic: 'Individual consultation', ...slot(4, 12), format: 'individual', participantEnrollmentIds: [groupStudentA.id] };
+    const solo = await request(server).post(path).set(headers(teacherToken, 'teacher')).set('Idempotency-Key', 'consultation').send(consultation).expect(200);
+    await request(server).get(`${path}/${solo.body.item.id}`).set(headers(studentBToken, 'student')).expect(404);
+    await request(server).get(`${path}?${range}`).set(headers(studentBToken, 'student')).expect(200)
+      .expect(({ body }) => expect(body.items.map((item: { id: string }) => item.id)).not.toContain(solo.body.item.id));
+    await request(server).post(`/api/v2/workspaces/${workspace.id}/courses/${group.id}/complete`).set(adminHeaders).set('If-Match', '0').send({}).expect(409);
+    await request(server).patch(`/api/v2/workspaces/${workspace.id}/courses/${group.id}`).set(adminHeaders).set('If-Match', '0')
+      .send({ endsOn: plus(2, 0).toISOString().slice(0, 10) }).expect(409)
+      .expect(({ body }) => expect(body.code).toBe('lessons_after_course_end'));
+    await request(server).patch(`${path}/${lessonId}`).set(adminHeaders).set('If-Match', '9').send({ topic: 'New topic' }).expect(412);
+    await request(server).patch(`${path}/${lessonId}`).set(adminHeaders).set('If-Match', '0').send({ topic: 'Revised equations' }).expect(200)
+      .expect(({ body }) => expect(body.item.revision).toBe(1));
+    await prisma.lesson.update({ where: { id: lessonId }, data: { startAt: plus(-1, 12), endAt: plus(-1, 13) } });
+    await request(server).post(`${path}/${lessonId}/complete`).set(adminHeaders).set('If-Match', '1')
+      .send({ attendance: [{ enrollmentId: groupStudentA.id, attendance: 'present' }] }).expect(422);
+    const completed = await request(server).post(`${path}/${lessonId}/complete`).set(adminHeaders).set('If-Match', '1').send({
+      attendance: [{ enrollmentId: groupStudentA.id, attendance: 'present' }, { enrollmentId: groupStudentB.id, attendance: 'absent' }], completionComment: 'Covered equations',
+    }).expect(200);
+    expect(completed.body.item).toMatchObject({ status: 'completed', revision: 2 });
+    await request(server).post(`${path}/${lessonId}/attendance-corrections`).set(adminHeaders).set('If-Match', '2')
+      .send({ enrollmentId: groupStudentB.id, attendance: 'excused', reason: 'Medical appointment confirmed' }).expect(200)
+      .expect(({ body }) => expect(body.item.participants.find((item: { enrollmentId: string }) => item.enrollmentId === groupStudentB.id).attendance).toBe('excused'));
+    expect(await prisma.workspaceAuditEvent.count({ where: { workspaceId: workspace.id, targetId: lessonId } })).toBe(4);
+    const canceled = await request(server).post(`${path}/${solo.body.item.id}/cancel`).set(adminHeaders).set('If-Match', '0')
+      .send({ reason: 'Student requested a different date' }).expect(200);
+    expect(canceled.body.item.status).toBe('canceled');
+    await request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'reuse-after-cancel').send(consultation).expect(200);
+    await request(server).patch(`/api/v2/workspaces/${workspace.id}/courses/${group.id}/enrollments/${groupStudentA.id}`)
+      .set(adminHeaders).set('If-Match', '0').send({ status: 'withdrawn' }).expect(409)
+      .expect(({ body }) => expect(body.code).toBe('future_lessons'));
+    const simultaneousSlot = slot(6, 12);
+    const simultaneous = await Promise.all([
+      request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'parallel-a').send({ ...consultation, ...simultaneousSlot }),
+      request(server).post(path).set(adminHeaders).set('Idempotency-Key', 'parallel-b').send({ ...sameStudent, ...simultaneousSlot, format: 'individual' }),
+    ]);
+    expect(simultaneous.map(response => response.status).sort()).toEqual([200, 409]);
+    expect(await prisma.lesson.count({ where: { startAt: plus(6, 12), courseId: { in: [group.id, secondCourse.id] } } })).toBe(1);
+    expect(adminMember.workspaceId).toBe(workspace.id);
   });
 });

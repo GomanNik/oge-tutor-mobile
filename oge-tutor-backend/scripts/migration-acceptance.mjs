@@ -117,6 +117,10 @@ try {
   assert.equal(await count('CourseTeacher'), 2);
   assert.equal(await count('Enrollment'), 2);
   assert.equal(await count('LegacyCourseMapping'), 2);
+  assert.equal(await count('LessonTeacher'), 1);
+  assert.equal(await count('LessonParticipant'), 1);
+  assert.deepEqual(await rows(`SELECT id,"courseId" FROM "Lesson" WHERE id='legacy-lesson'`),
+    [{ id: 'legacy-lesson', courseId: 'legacy-course-legacy-s1' }]);
   assert.deepEqual(await rows(`SELECT c.id,c.status,e.status AS "enrollmentStatus" FROM "Course" c JOIN "Enrollment" e ON e."courseId"=c.id WHERE c.id='legacy-course-legacy-s1'`),
     [{ id: 'legacy-course-legacy-s1', status: 'active', enrollmentStatus: 'active' }]);
   assert.deepEqual(await rows(`SELECT id,status FROM "ProgramVersion" WHERE id='legacy-version-oge-math'`),
@@ -126,12 +130,14 @@ try {
   assert.equal(firstBackfill.memberships, 0);
   assert.equal(firstBackfill.grants, 0);
   await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "WorkspaceMembership" WHERE id='legacy-student-legacy-s1'`));
-  await db.$executeRawUnsafe(`DELETE FROM "LegacyCourseMapping" WHERE "studentProfileId"='legacy-s1'`);
-  await db.$executeRawUnsafe(`DELETE FROM "Enrollment" WHERE id='legacy-enrollment-legacy-s1'`);
-  await db.$executeRawUnsafe(`DELETE FROM "CourseTeacher" WHERE id='legacy-course-teacher-legacy-s1'`);
-  await db.$executeRawUnsafe(`DELETE FROM "Course" WHERE id='legacy-course-legacy-s1'`);
-  await db.$executeRawUnsafe(`DELETE FROM "WorkspaceRoleGrant" WHERE "membershipId"='legacy-student-legacy-s1'`);
-  await db.$executeRawUnsafe(`DELETE FROM "WorkspaceMembership" WHERE id='legacy-student-legacy-s1'`);
+  await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "Enrollment" WHERE id='legacy-enrollment-legacy-s1'`));
+  await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "CourseTeacher" WHERE id='legacy-course-teacher-legacy-s1'`));
+  await db.$executeRawUnsafe(`DELETE FROM "LegacyCourseMapping" WHERE "studentProfileId"='legacy-s2'`);
+  await db.$executeRawUnsafe(`DELETE FROM "Enrollment" WHERE id='legacy-enrollment-legacy-s2'`);
+  await db.$executeRawUnsafe(`DELETE FROM "CourseTeacher" WHERE id='legacy-course-teacher-legacy-s2'`);
+  await db.$executeRawUnsafe(`DELETE FROM "Course" WHERE id='legacy-course-legacy-s2'`);
+  await db.$executeRawUnsafe(`DELETE FROM "WorkspaceRoleGrant" WHERE "membershipId"='legacy-student-legacy-s2'`);
+  await db.$executeRawUnsafe(`DELETE FROM "WorkspaceMembership" WHERE id='legacy-student-legacy-s2'`);
   const recovered = JSON.parse(backfill().trim().split('\n').at(-1));
   assert.equal(recovered.memberships, 1);
   assert.equal(recovered.grants, 1);
