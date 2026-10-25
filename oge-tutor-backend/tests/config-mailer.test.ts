@@ -40,6 +40,7 @@ describe('environment validation', () => {
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/app',
       JWT_SECRET: 'safe-production-secret',
       WORKSPACE_INVITE_KEY: 'a-long-independent-invitation-key-for-tests',
+      METRICS_TOKEN: 'a-long-independent-metrics-token-for-tests',
       PUBLIC_BACKEND_URL: 'https://api.example.com',
       APP_FRONTEND_URL: 'https://app.example.com',
       MAILER_PROVIDER: 'smtp',
@@ -54,6 +55,7 @@ describe('environment validation', () => {
     expect(env.MAILER_PROVIDER).toBe('smtp');
     expect(env.SMTP_PORT).toBe(465);
     expect(env.SMTP_SECURE).toBe(true);
+    expect(env.METRICS_TOKEN).toBe('a-long-independent-metrics-token-for-tests');
   });
 
   it('allows explicit non-production noop mailer fallback', () => {

@@ -163,6 +163,7 @@ export class ProgramCatalogService {
   async updateSubject(actor: Actor, id: string, name: string, revision: number, archive = false) {
     const current = await this.prisma.subject.findUnique({ where: { id } });
     if (!current) throw notFound();
+    await this.assertReadable(actor, current);
     return this.mutate(actor, current, async tx => {
       const updated = await tx.subject.updateMany({ where: { id, revision, status: 'active' }, data: { ...(archive ? { status: 'archived' as CatalogStatus } : { name: name.trim() }), revision: { increment: 1 } } });
       if (!updated.count) throw revisionError();
@@ -212,6 +213,7 @@ export class ProgramCatalogService {
   async updateProgram(actor: Actor, id: string, name: string, revision: number, archive = false) {
     const current = await this.prisma.examProgram.findUnique({ where: { id } });
     if (!current) throw notFound();
+    await this.assertReadable(actor, current);
     return this.mutate(actor, current, async tx => {
       const updated = await tx.examProgram.updateMany({ where: { id, revision, status: 'active' }, data: { ...(archive ? { status: 'archived' as CatalogStatus } : { name: name.trim() }), revision: { increment: 1 } } });
       if (!updated.count) throw revisionError();
@@ -249,6 +251,7 @@ export class ProgramCatalogService {
   async createVersion(actor: Actor, programId: string, body: CreateProgramVersionDto, key: string) {
     const program = await this.prisma.examProgram.findUnique({ where: { id: programId } });
     if (!program) throw notFound();
+    await this.assertReadable(actor, program);
     return this.createOnce(actor, program, `catalog:versions:${programId}`, key, body, async tx => {
       const current = await tx.examProgram.findUniqueOrThrow({ where: { id: programId }, include: { subject: true } });
       if (current.status !== 'active' || current.subject.status !== 'active') throw invalidState('Архивная программа или предмет не допускают новую версию.');
@@ -263,6 +266,7 @@ export class ProgramCatalogService {
   private async editDraft<T>(actor: Actor, id: string, revision: number, action: (tx: Prisma.TransactionClient, owner: Owner) => Promise<T>) {
     const current = await this.prisma.programVersion.findUnique({ where: { id }, include: { program: true } });
     if (!current) throw notFound();
+    await this.assertReadable(actor, current.program, current.status);
     return this.mutate(actor, current.program, async tx => {
       const row = await tx.programVersion.findUniqueOrThrow({ where: { id } });
       if (row.revision !== revision) throw revisionError();
@@ -342,6 +346,7 @@ export class ProgramCatalogService {
   async publish(actor: Actor, id: string, revision: number) {
     const current = await this.prisma.programVersion.findUnique({ where: { id }, include: { program: true } });
     if (!current) throw notFound();
+    await this.assertReadable(actor, current.program, current.status);
     return this.mutate(actor, current.program, async tx => {
       const version = await tx.programVersion.findUniqueOrThrow({ where: { id }, include: { program: { include: { subject: true } }, tasks: true, scoringRule: true } });
       if (version.revision !== revision) throw revisionError();
@@ -359,6 +364,7 @@ export class ProgramCatalogService {
   async archiveVersion(actor: Actor, id: string, revision: number) {
     const current = await this.prisma.programVersion.findUnique({ where: { id }, include: { program: true } });
     if (!current) throw notFound();
+    await this.assertReadable(actor, current.program, current.status);
     return this.mutate(actor, current.program, async tx => {
       const updated = await tx.programVersion.updateMany({ where: { id, revision, status: 'published' }, data: { status: 'archived', revision: { increment: 1 } } });
       if (!updated.count) throw revisionError();
@@ -387,6 +393,8 @@ export class ProgramCatalogService {
       this.prisma.taskDefinition.findUnique({ where: { id: body.toTaskId }, include: { programVersion: { include: { program: true } } } }),
     ]);
     if (!from || !to) throw notFound();
+    await this.assertReadable(actor, from.programVersion.program, from.programVersion.status);
+    await this.assertReadable(actor, to.programVersion.program, to.programVersion.status);
     if (from.programVersionId === to.programVersionId || from.programVersion.programId !== to.programVersion.programId) throw validationError('Нужны задания разных версий одной программы.');
     if (from.programVersion.status === 'draft' || to.programVersion.status === 'draft') throw validationError('Сопоставлять можно опубликованные версии.');
     const owner = from.programVersion.program;
@@ -401,6 +409,7 @@ export class ProgramCatalogService {
     const current = await this.prisma.taskMapping.findUnique({ where: { id }, include: { fromTask: { include: { programVersion: { include: { program: true } } } } } });
     if (!current) throw notFound();
     const owner = current.fromTask.programVersion.program;
+    await this.assertReadable(actor, owner);
     return this.mutate(actor, owner, async tx => {
       const updated = await tx.taskMapping.updateMany({ where: { id, revision, revokedAt: null }, data: {
         revision: { increment: 1 }, revokedAt: new Date(), revokedById: actor.user.id, revocationReason: reason.trim(),

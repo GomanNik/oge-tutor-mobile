@@ -10,6 +10,7 @@
     "lint": "eslint . && node scripts/quality-check.mjs lint",
     "typecheck": "node scripts/quality-check.mjs typecheck",
     "test": "vitest run && node scripts/quality-check.mjs test",
+    "test:browser": "playwright test",
     "quality": "pnpm run lint && pnpm run typecheck && pnpm test"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
+    "@playwright/test": "1.64.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.0",
     "eslint": "9.39.1",
