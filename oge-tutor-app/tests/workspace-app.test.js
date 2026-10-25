@@ -134,6 +134,6 @@ describe('WorkspaceApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     await screen.findByRole('tab', { name: 'Предметы' });
     expect(screen.getByRole('button', { name: 'Создать предмет' })).toBeTruthy();
-    expect(client.subjects).toHaveBeenCalledWith(null, { q: '', status: '', page: 1, pageSize: 25 });
+    await waitFor(() => expect(client.subjects).toHaveBeenCalledWith(null, { q: '', status: '', page: 1, pageSize: 25 }));
   });
 });
