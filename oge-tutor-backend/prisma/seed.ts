@@ -7,6 +7,10 @@ const prisma = new PrismaClient();
 async function main() {
   const passwordHash = await bcrypt.hash('123456', 12);
 
+  await prisma.$executeRaw`TRUNCATE TABLE "LearningProgressProjection", "LearningProgressEvent"`;
+  await prisma.learningDelivery.deleteMany();
+  await prisma.learningNotification.deleteMany();
+  await prisma.learningNotificationPreference.deleteMany();
   await prisma.materialPublicationRecipient.deleteMany();
   await prisma.materialPublication.deleteMany();
   await prisma.learningMaterial.deleteMany();

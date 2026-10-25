@@ -100,7 +100,7 @@ function CreateCourse({ api, context, onCreated, onCancel, onAccessError }) {
   </section>;
 }
 
-function BatchEnroll({ api, context, courseId, onApplied, onAccessError }) {
+function BatchEnroll({ api, context, courseId, onApplied, onAccessError, disabled = false }) {
   const [query, setQuery] = useState('');
   const [members, setMembers] = useState([]);
   const [selected, setSelected] = useState({});
@@ -139,13 +139,13 @@ function BatchEnroll({ api, context, courseId, onApplied, onAccessError }) {
       <label>Статус<select value={status} onChange={event => { setStatus(event.target.value); setPreview(null); }}><option value="active">Зачислить</option><option value="invited">Пригласить</option></select></label>
     </div>
     <div className="course-batch-members">{members.map(member => <label key={member.id}>
-      <input type="checkbox" checked={Boolean(selected[member.userId])} disabled={!selected[member.userId] && Object.keys(selected).length >= 50} onChange={event => {
+      <input type="checkbox" checked={Boolean(selected[member.userId])} disabled={disabled || busy || (!selected[member.userId] && Object.keys(selected).length >= 50)} onChange={event => {
         setSelected(current => { const next = { ...current }; if (event.target.checked) next[member.userId] = member.displayName; else delete next[member.userId]; return next; });
         setPreview(null);
       }} />{member.displayName}
     </label>)}</div>
-    <div className="course-actions"><button type="button" disabled={busy || Object.keys(selected).length === 0} onClick={check}>Проверить набор</button>
-      {preview?.canApply && <button type="button" disabled={busy} onClick={apply}>Зачислить всех</button>}
+    <div className="course-actions"><button type="button" disabled={disabled || busy || Object.keys(selected).length === 0} onClick={check}>Проверить набор</button>
+      {preview?.canApply && <button type="button" disabled={disabled || busy} onClick={apply}>Зачислить всех</button>}
     </div>
     {preview && <div className="course-batch-preview"><strong>{preview.canApply ? 'Можно применить' : 'Есть конфликты'}</strong>
       {preview.items.map(item => <p key={item.studentUserId}>{item.displayName || item.studentUserId}: {item.reason || 'Готов'}</p>)}
@@ -272,7 +272,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
         <label>Заметка для команды<textarea maxLength="1000" value={note} onChange={event => setNote(event.target.value)} /></label>
         <button type="submit" disabled={busy || !studentId}>Добавить</button>
       </form>}
-      {admin && !course.legacy && !['completed', 'archived'].includes(course.status) && <BatchEnroll api={api} context={context} courseId={course.id} onApplied={() => { onChanged(course); setVersion(value => value + 1); }} onAccessError={onAccessError} />}
+      {admin && !course.legacy && !['completed', 'archived'].includes(course.status) && <BatchEnroll api={api} context={context} courseId={course.id} disabled={busy} onApplied={() => { onChanged(course); setVersion(value => value + 1); }} onAccessError={onAccessError} />}
       {editingEnrollment && <form className="course-inline-form course-edit-enrollment" onSubmit={changeEnrollment}>
         <h3>{editingEnrollment.displayName}</h3>
         <label>Статус<select value={editingEnrollment.nextStatus} onChange={event => setEditingEnrollment(current => ({ ...current, nextStatus: event.target.value }))}>
@@ -288,7 +288,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
   </div>;
 }
 
-export default function CoursesPanel({ api, context, onAccessError, legacyRole, onLegacy }) {
+export default function CoursesPanel({ api, context, onAccessError, legacyRole, onLegacy, openCourseId = '' }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -304,6 +304,7 @@ export default function CoursesPanel({ api, context, onAccessError, legacyRole, 
   const sequence = useRef(0);
 
   useEffect(() => { setPage(1); setRows([]); setSelectedId(''); setSelected(null); }, [context, query, status, format]);
+  useEffect(() => { if (openCourseId) setSelectedId(openCourseId); }, [openCourseId, context]);
   useEffect(() => {
     const current = ++sequence.current;
     let alive = true;

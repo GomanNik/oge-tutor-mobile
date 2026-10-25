@@ -20,6 +20,12 @@ async function main() {
         const student = await tx.studentProfile.create({ data: { userId: user.id, teacherId: teacher.id, name, grade: '9 класс', goal: 'ОГЭ', settings: {}, access: 'active' } });
         await ensureLegacyStudent(tx, student.id);
       }
+      const learningTeacherUser = await tx.user.create({ data: { email: 'learning-teacher@test.local', displayName: 'Преподаватель прогресса', passwordHash, role: 'teacher' } });
+      const learningTeacher = await tx.teacherProfile.create({ data: { userId: learningTeacherUser.id, name: 'Преподаватель прогресса', settings: {} } });
+      await ensureLegacyTeacher(tx, learningTeacher.id);
+      const learningUser = await tx.user.create({ data: { email: 'learning-student@test.local', displayName: 'Ученик прогресса', passwordHash, role: 'student' } });
+      const learningStudent = await tx.studentProfile.create({ data: { userId: learningUser.id, teacherId: learningTeacher.id, name: 'Ученик прогресса', grade: '9 класс', goal: 'ОГЭ', settings: {}, access: 'active' } });
+      await ensureLegacyStudent(tx, learningStudent.id);
     });
     console.log('Browser course fixture ready.');
   } finally {

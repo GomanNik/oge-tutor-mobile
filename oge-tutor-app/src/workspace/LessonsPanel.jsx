@@ -148,7 +148,7 @@ function LessonRow({ api, context, lesson, onChanged, onAccessError }) {
   </article>;
 }
 
-export default function LessonsPanel({ api, context, course = null, onAccessError }) {
+export default function LessonsPanel({ api, context, course = null, onAccessError, openLessonId = '' }) {
   const [from, setFrom] = useState(() => day(Date.now() - 7 * 86400000));
   const [to, setTo] = useState(() => day(Date.now() + 60 * 86400000));
   const [rows, setRows] = useState([]);
@@ -159,6 +159,14 @@ export default function LessonsPanel({ api, context, course = null, onAccessErro
   const [options, setOptions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [openedLesson, setOpenedLesson] = useState(null);
+  useEffect(() => {
+    if (!openLessonId) return;
+    let alive = true;
+    api.lesson(context, openLessonId).then(result => { if (alive) setOpenedLesson(result.item); })
+      .catch(err => { if (alive) { setError(errorText(err)); onAccessError(err); } });
+    return () => { alive = false; };
+  }, [api, context, openLessonId, version, onAccessError]);
   const refresh = () => { setPage(1); setVersion(value => value + 1); };
   useEffect(() => { setPage(1); setRows([]); }, [context, course?.id, from, to]);
   useEffect(() => {
@@ -190,7 +198,8 @@ export default function LessonsPanel({ api, context, course = null, onAccessErro
     {error && <p className="workspace-error" role="alert">{error}</p>}
     {loading && rows.length === 0 && <p className="workspace-muted">Загрузка…</p>}
     {!loading && rows.length === 0 && !error && !invalidRange && <p className="workspace-muted">Занятий в этом периоде нет.</p>}
-    <div className="lesson-list">{rows.map(lesson => <LessonRow key={lesson.id} api={api} context={context} lesson={lesson} onChanged={refresh} onAccessError={onAccessError} />)}</div>
+    {openedLesson && <div className="lesson-list"><LessonRow key={openedLesson.id} api={api} context={context} lesson={openedLesson} onChanged={refresh} onAccessError={onAccessError} /></div>}
+    <div className="lesson-list">{rows.filter(lesson => lesson.id !== openedLesson?.id).map(lesson => <LessonRow key={lesson.id} api={api} context={context} lesson={lesson} onChanged={refresh} onAccessError={onAccessError} />)}</div>
     {rows.length < total && <button type="button" className="workspace-more" disabled={loading} onClick={() => setPage(value => value + 1)}>Показать ещё</button>}
   </section>;
 }

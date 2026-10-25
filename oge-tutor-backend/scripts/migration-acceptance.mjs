@@ -106,6 +106,12 @@ try {
     VALUES ('legacy-topic','legacy-t1',1,'Task 1',NOW())`);
   await db.$executeRawUnsafe(`INSERT INTO "MaterialAttachment" (id,"topicId",type,source,title,url)
     VALUES ('legacy-attachment','legacy-topic','link','link','Task 1 notes','https://example.test/notes')`);
+  await db.$executeRawUnsafe(`INSERT INTO "StudentTaskProgress" (id,"studentId","taskNumber","coverageStatus","masteryLevel","teacherComment","lastActivityAt","updatedAt")
+    VALUES ('legacy-progress','legacy-s1',1,'assessed','good','Private historical note',NOW(),NOW())`);
+  await db.$executeRawUnsafe(`INSERT INTO "ProgressHistory" (id,"studentId","taskProgressId","taskNumber",type,source,"coverageStatus","masteryLevel",comment,"createdAt")
+    VALUES ('legacy-history','legacy-s1','legacy-progress',1,'manual_update','manual','assessed','medium','Private history comment',NOW()-INTERVAL '1 day')`);
+  await db.$executeRawUnsafe(`INSERT INTO "Notification" (id,type,status,"teacherId","studentId","taskNumber",title,message)
+    VALUES ('legacy-notification','progress_assessment_required','read','legacy-t1','legacy-s1',1,'Assessment needed','Historical reminder')`);
   const before = await rows('SELECT id,email,"passwordHash",role FROM "User" ORDER BY id');
   const lessonBefore = await rows('SELECT id,"teacherId","studentId",topic FROM "Lesson"');
   const sessionBefore = await rows('SELECT id,"userId",version FROM "AuthSession"');
@@ -128,6 +134,21 @@ try {
   assert.equal(await count('CourseTeacher'), 2);
   assert.equal(await count('Enrollment'), 2);
   assert.equal(await count('LegacyCourseMapping'), 2);
+  const importedHistory = (await rows(`SELECT "authorUserId",source,comment,"legacyPayload"->>'comment' AS "originalComment" FROM "LearningProgressEvent" WHERE "sourceKey"='legacy-history:legacy-history'`))[0];
+  assert.deepEqual(importedHistory, { authorUserId: null, source: 'legacy_unknown', comment: '', originalComment: 'Private history comment' });
+  assert.equal((await rows(`SELECT event."masteryLevel" FROM "LearningProgressProjection" projection JOIN "LearningProgressEvent" event ON event.id=projection."eventId" WHERE projection."enrollmentId"='legacy-enrollment-legacy-s1'`))[0].masteryLevel, 'good');
+  assert.deepEqual(await rows(`SELECT "recipientUserId","recipientRole",("readAt" IS NOT NULL) AS read FROM "LearningNotification" WHERE "legacyNotificationId"='legacy-notification'`), [{ recipientUserId: 'legacy-tu1', recipientRole: 'teacher', read: true }]);
+  assert.equal(await count('LearningDelivery'), 0);
+  await db.$executeRawUnsafe(`UPDATE "Notification" SET status='unread' WHERE id='legacy-notification'`);
+  assert.equal((await rows(`SELECT "readAt" IS NULL AS unread FROM "LearningNotification" WHERE "legacyNotificationId"='legacy-notification'`))[0].unread, true);
+  await db.$executeRawUnsafe(`INSERT INTO "ProgressHistory" (id,"studentId","taskNumber",type,source,"coverageStatus","masteryLevel") VALUES ('after-migration-history','legacy-s1',1,'manual_update','manual','assessed','strong')`);
+  assert.equal((await rows(`SELECT event."masteryLevel" FROM "LearningProgressProjection" projection JOIN "LearningProgressEvent" event ON event.id=projection."eventId" WHERE projection."enrollmentId"='legacy-enrollment-legacy-s1'`))[0].masteryLevel, 'strong');
+  await db.$executeRawUnsafe(`UPDATE "StudentTaskProgress" SET "masteryLevel"='weak',"lastActivityAt"=NOW()+INTERVAL '1 second',"updatedAt"=NOW() WHERE id='legacy-progress'`);
+  await db.$executeRawUnsafe(`DELETE FROM "LearningProgressProjection"`);
+  await db.$executeRawUnsafe(`SELECT learning_rebuild_progress()`);
+  assert.equal((await rows(`SELECT event."masteryLevel" FROM "LearningProgressProjection" projection JOIN "LearningProgressEvent" event ON event.id=projection."eventId" WHERE projection."enrollmentId"='legacy-enrollment-legacy-s1'`))[0].masteryLevel, 'weak');
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "LearningProgressEvent" SET comment='lost history' WHERE "sourceKey"='legacy-history:legacy-history'`));
+  await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "LearningProgressEvent" WHERE "sourceKey"='legacy-history:legacy-history'`));
   assert.equal(await count('LessonTeacher'), 1);
   assert.equal(await count('LessonParticipant'), 1);
   assert.deepEqual(await rows(`SELECT id,"courseId" FROM "Lesson" WHERE id='legacy-lesson'`),
@@ -231,7 +252,7 @@ try {
   assert.equal(await count('User'), 1);
   assert.equal(await count('Workspace'), 1);
 
-  console.log('Migration acceptance passed: fresh bootstrap, legacy data, replay, backfill recovery, constraints, catalog import.');
+  console.log('Migration acceptance passed: fresh bootstrap, legacy data, replay, backfill recovery, constraints, catalog import, immutable progress and notification recipients.');
 } finally {
   await db?.$disconnect();
   await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(error => {

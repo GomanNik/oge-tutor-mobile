@@ -18,7 +18,8 @@
     "demo:seed": "ts-node --project tsconfig.json prisma/demo-seed.ts",
     "bootstrap:teacher": "ts-node --project tsconfig.json src/cli/bootstrap-teacher.ts",
     "workspace:operator": "ts-node --project tsconfig.json src/cli/workspace-operator.ts",
-    "catalog:operator": "ts-node --project tsconfig.json src/cli/catalog-operator.ts"
+    "catalog:operator": "ts-node --project tsconfig.json src/cli/catalog-operator.ts",
+    "learning:operator": "ts-node --project tsconfig.json src/cli/learning-operator.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.1.27",

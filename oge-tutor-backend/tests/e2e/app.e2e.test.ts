@@ -112,7 +112,9 @@ describeIfDb('AppModule e2e production flows', () => {
     // TRUNCATE CASCADE also removes the global catalog because its tables contain optional workspace FKs.
     await prisma.subject.create({ data: { id: 'legacy-subject-math', scopeKey: 'global', code: 'math', name: 'Математика' } });
     await prisma.examProgram.create({ data: { id: 'legacy-program-oge-math', scopeKey: 'global', subjectId: 'legacy-subject-math', code: 'oge-math', examType: 'oge', variant: 'general', name: 'ОГЭ · математика' } });
-    await prisma.programVersion.create({ data: { id: 'legacy-version-oge-math', programId: 'legacy-program-oge-math', period: 'legacy-import', revisionNumber: 1, status: 'published', publishedAt: new Date() } });
+    await prisma.programVersion.create({ data: { id: 'legacy-version-oge-math', programId: 'legacy-program-oge-math', period: 'legacy-import', revisionNumber: 1, status: 'draft' } });
+    await prisma.taskDefinition.createMany({ data: Array.from({ length: 25 }, (_, index) => ({ id: `legacy-task-${index + 1}`, programVersionId: 'legacy-version-oge-math', code: String(index + 1), title: `Задание ${index + 1}`, position: index + 1, kind: 'short_answer', maxScore: 1 })) });
+    await prisma.programVersion.update({ where: { id: 'legacy-version-oge-math' }, data: { status: 'published', publishedAt: new Date() } });
 
     const initialTeacher = await prisma.user.create({
       data: {
@@ -1337,6 +1339,8 @@ describeIfDb('AppModule e2e production flows', () => {
     await request(server).post(`${path}/${lessonId}/attendance-corrections`).set(adminHeaders).set('If-Match', '2')
       .send({ enrollmentId: groupStudentB.id, attendance: 'excused', reason: 'Medical appointment confirmed' }).expect(200)
       .expect(({ body }) => expect(body.item.participants.find((item: { enrollmentId: string }) => item.enrollmentId === groupStudentB.id).attendance).toBe('excused'));
+    await request(server).get(`/api/v2/workspaces/${workspace.id}/enrollments/${groupStudentB.id}/progress/events?source=lesson`).set(headers(studentBToken, 'student')).expect(200)
+      .expect(({ body }) => { expect(body.items).toHaveLength(2); expect(body.items[0].evidence.attendance).toBe('excused'); expect(body.items[0].supersedesId).toBeTruthy(); expect(body.items.every((item: { score: number | null }) => item.score === null)).toBe(true); });
     expect(await prisma.workspaceAuditEvent.count({ where: { workspaceId: workspace.id, targetId: lessonId } })).toBe(4);
     const canceled = await request(server).post(`${path}/${solo.body.item.id}/cancel`).set(adminHeaders).set('If-Match', '0')
       .send({ reason: 'Student requested a different date' }).expect(200);
@@ -1450,6 +1454,8 @@ describeIfDb('AppModule e2e production flows', () => {
     await request(server).post(`${path}/reviews/${correction.body.item.id}/publish`).set(teacherHeaders).set('If-Match', '0').set('Idempotency-Key', 'publish-correction').send({}).expect(200);
     const history = await request(server).get(`${path}/assignment-recipients/${recipientA.id}/submissions`).set(aHeaders).expect(200);
     expect(history.body.items[0].reviews).toHaveLength(2);
+    await request(server).get(`${path}/enrollments/${a.id}/progress/events?source=submission`).set(aHeaders).expect(200)
+      .expect(({ body }) => { expect(body.items.length).toBeGreaterThanOrEqual(3); expect(body.items.some((item: { supersedesId: string | null }) => item.supersedesId)).toBe(true); });
     await request(server).post(`${path}/assignments/${assignmentId}/close`).set(teacherHeaders).set('If-Match', '1').send({ reason: 'Период работы завершён' }).expect(200);
     await request(server).get(`${path}/assignments/${assignmentId}/recipients`).set(bHeaders).expect(200)
       .expect(({ body }) => expect(body.items[0].status).toBe('closed'));
@@ -1494,5 +1500,131 @@ describeIfDb('AppModule e2e production flows', () => {
     expect(adminMember.workspaceId).toBe(workspace.id);
     expect(otherTeacherMember.workspaceId).toBe(workspace.id);
     expect(c.id).toBeTruthy();
+  });
+
+  it('isolates enrollment progress, preserves corrections and delivers addressed notifications with recoverable leases', async () => {
+    const passwordHash = await bcrypt.hash('learning-test-123', 4);
+    const users = await Promise.all(['admin', 'teacher', 'other', 'student', 'peer'].map(name => prisma.user.create({ data: { email: `learning-${name}@test.local`, displayName: name, passwordHash } })));
+    const [admin, teacher, other, student, peer] = users;
+    const workspace = await prisma.workspace.create({ data: { name: 'Learning E2E', slug: 'learning-e2e' } });
+    const roles = ['admin', 'teacher', 'teacher', 'student', 'student'];
+    const members = await Promise.all(users.map((user, index) => prisma.workspaceMembership.create({ data: { workspaceId: workspace.id, userId: user.id, roles: { create: [{ role: roles[index] }] } } })));
+    const subject = await prisma.subject.create({ data: { scopeKey: 'global', code: 'learning-chemistry', name: 'Химия' } });
+    const program = await prisma.examProgram.create({ data: { scopeKey: 'global', subjectId: subject.id, code: 'learning-ege', examType: 'ege', variant: 'general', name: 'ЕГЭ химия' } });
+    const version = await prisma.programVersion.create({ data: { programId: program.id, period: '2026', revisionNumber: 1 } });
+    const task = await prisma.taskDefinition.create({ data: { programVersionId: version.id, code: 'C1', title: 'Реакции', position: 1, kind: 'extended_answer', maxScore: 4 } });
+    await prisma.programVersion.update({ where: { id: version.id }, data: { status: 'published', publishedAt: new Date() } });
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const makeCourse = (title: string) => prisma.course.create({ data: { workspaceId: workspace.id, programVersionId: version.id, title, status: 'active', defaultFormat: 'group', capacity: 3, startsOn: today, timezone: 'UTC' } });
+    const [course, second] = await Promise.all([makeCourse('Химия · первый курс'), makeCourse('Химия · второй курс')]);
+    const firstTeacher = await prisma.courseTeacher.create({ data: { workspaceId: workspace.id, courseId: course.id, membershipId: members[1].id, role: 'lead', startsOn: today } });
+    await prisma.courseTeacher.create({ data: { workspaceId: workspace.id, courseId: course.id, membershipId: members[2].id, role: 'assistant', startsOn: today } });
+    await prisma.courseTeacher.create({ data: { workspaceId: workspace.id, courseId: second.id, membershipId: members[2].id, role: 'lead', startsOn: today } });
+    const enroll = (courseId: string, membershipId: string) => prisma.enrollment.create({ data: { workspaceId: workspace.id, courseId, membershipId, status: 'active', startsOn: today } });
+    const [enrollment, secondEnrollment, peerEnrollment] = await Promise.all([enroll(course.id, members[3].id), enroll(second.id, members[3].id), enroll(course.id, members[4].id)]);
+    const { AuthService } = await import('../../src/auth/auth.service');
+    const tokens = await Promise.all(users.map(user => app.get(AuthService).signAccountSession(user.id).then(result => result.token)));
+    const headers = (index: number) => ({ ...auth(tokens[index]), 'X-Active-Role': roles[index] });
+    const path = `/api/v2/workspaces/${workspace.id}`;
+    const progressPath = `${path}/enrollments/${enrollment.id}/progress`;
+    const privateComment = 'Только автор видит личную заметку';
+    const assessment = { taskDefinitionId: task.id, visibility: 'private', score: 1, basis: 'Диагностика по теме', comment: privateComment };
+    const postAssessment = (body: object, key: string, index = 1, id = enrollment.id) => request(server).post(`${path}/enrollments/${id}/progress/assessments`).set(headers(index)).set('Idempotency-Key', key).send(body);
+    const privateResult = await postAssessment(assessment, 'private-assessment').expect(200);
+    for (const index of [0, 2, 3]) await request(server).get(`${progressPath}/events`).set(headers(index)).expect(200).expect(({ body }) => expect(body.items).toHaveLength(0));
+    await request(server).get(progressPath).set(headers(3)).expect(200).expect(({ body }) => { expect(body.item.tasks[0].event).toBeNull(); expect(body.item.tasks[0].privateEvents).toHaveLength(0); });
+    await request(server).get(progressPath).set(headers(1)).expect(200).expect(({ body }) => expect(body.item.tasks[0].privateEvents[0].comment).toBe(privateComment));
+    const publishedBody = { ...assessment, visibility: 'published', score: 2, comment: 'Опубликованная оценка', replacesEventId: privateResult.body.item.id, reason: 'Проверка завершена' };
+    const published = await postAssessment(publishedBody, 'publish-assessment').expect(200);
+    await postAssessment(publishedBody, 'publish-assessment').expect(200).expect(({ body }) => expect(body.item.id).toBe(published.body.item.id));
+    await postAssessment({ ...publishedBody, score: 3 }, 'publish-assessment').expect(409);
+    await postAssessment({ ...assessment, taskDefinitionId: 'legacy-task-1' }, 'foreign-task').expect(422);
+    await postAssessment({ ...assessment, coverageStatus: 'in_progress' }, 'inconsistent-score').expect(422);
+    await postAssessment({ ...assessment, basis: '    x' }, 'blank-basis').expect(422);
+    await postAssessment({ ...assessment, occurredAt: '2026-10-01T12:00:00' }, 'missing-timezone').expect(400);
+    await postAssessment(assessment, 'student-assessment', 3).expect(403);
+    await postAssessment(assessment, 'admin-assessment', 0).expect(403);
+    await request(server).get(`${path}/enrollments/${peerEnrollment.id}/progress`).set(headers(3)).expect(404);
+    await request(server).get(`${path}/enrollments/${secondEnrollment.id}/progress`).set(headers(1)).expect(404);
+    await postAssessment({ ...assessment, replacesEventId: published.body.item.id, reason: 'Попытка скрытого исправления' }, 'hide-public').expect(422);
+    const correction = await postAssessment({ ...publishedBody, replacesEventId: published.body.item.id, score: 3, reason: 'Исправлен балл по работе' }, 'correct').expect(200);
+    const concurrent = await Promise.all(['a', 'b'].map(key => postAssessment({ ...publishedBody, replacesEventId: correction.body.item.id, score: 4, reason: 'Повторная проверка результата' }, `concurrent-${key}`)));
+    expect(concurrent.filter(result => result.status === 200)).toHaveLength(1);
+    expect(concurrent.filter(result => [404, 409].includes(result.status))).toHaveLength(1);
+    const winner = concurrent.find(result => result.status === 200)!.body.item;
+    const retracted = await postAssessment({ taskDefinitionId: task.id, visibility: 'published', basis: 'Ошибочная оценка отозвана', comment: '', retract: true, replacesEventId: winner.id, reason: 'Работа относится к другому занятию' }, 'retract').expect(200);
+    await request(server).get(progressPath).set(headers(3)).expect(200).expect(({ body }) => expect(body.item.tasks[0].event).toBeNull());
+    expect(await prisma.learningProgressEvent.count({ where: { id: winner.id } })).toBe(1);
+    await expect(prisma.learningProgressEvent.update({ where: { id: winner.id }, data: { score: 0 } })).rejects.toThrow();
+    await postAssessment({ ...assessment, visibility: 'published', score: 4, comment: 'Первый курс' }, 'first-course-result').expect(200);
+    await postAssessment({ ...assessment, visibility: 'published', score: 1, comment: 'Второй курс' }, 'second-course-result', 2, secondEnrollment.id).expect(200);
+    const summary = await request(server).get(`${path}/students/${student.id}/program-progress?programVersionId=${version.id}`).set(headers(3)).expect(200);
+    expect(summary.body.item.courses.map((item: { tasks: { event: { score: number } }[] }) => item.tasks[0].event.score).sort()).toEqual([1, 4]);
+    expect(summary.body.item).not.toHaveProperty('overallScore');
+    await request(server).get(`${path}/students/${student.id}/program-progress?programVersionId=${version.id}`).set(headers(1)).expect(200).expect(({ body }) => expect(body.item.courses).toHaveLength(1));
+    const firstPage = await request(server).get(`${progressPath}/events?limit=1`).set(headers(3)).expect(200);
+    const nextPage = await request(server).get(`${progressPath}/events?limit=1&cursor=${firstPage.body.pageInfo.nextCursor}`).set(headers(3)).expect(200);
+    expect(firstPage.body.items[0].id).not.toBe(nextPage.body.items[0].id);
+    await request(server).get(`${progressPath}/events?cursor=invalid`).set(headers(3)).expect(400);
+    const { LearningProgressService } = await import('../../src/learning/learning-progress.service');
+    await prisma.learningProgressProjection.deleteMany({ where: { enrollmentId: enrollment.id } });
+    await app.get(LearningProgressService).rebuildProgress();
+    await request(server).get(progressPath).set(headers(3)).expect(200).expect(({ body }) => expect(body.item.tasks[0].event.score).toBe(4));
+    const notices = await request(server).get(`${path}/notifications`).set(headers(3)).expect(200);
+    expect(notices.body.unreadCount).toBeGreaterThan(0);
+    expect(JSON.stringify(notices.body)).not.toContain(privateComment);
+    const notice = notices.body.items[0];
+    await request(server).get(`${path}/notifications/${notice.id}/target`).set(headers(4)).expect(404);
+    await request(server).patch(`${path}/notifications/${notice.id}`).set(headers(3)).send({ read: true }).expect(428);
+    await request(server).patch(`${path}/notifications/${notice.id}`).set(headers(3)).set('If-Match', '99').send({ read: true }).expect(412);
+    await request(server).patch(`${path}/notifications/${notice.id}`).set(headers(3)).set('If-Match', String(notice.revision)).send({ read: true }).expect(200);
+    await request(server).get(`/api/v2/me/notifications?workspaceId=${workspace.id}`).set(headers(3)).expect(200);
+    await postAssessment({ ...assessment, visibility: 'published', score: 2, comment: '' }, 'after-list').expect(200);
+    await request(server).post(`${path}/notifications/read-all`).set(headers(3)).send({ before: notices.body.asOf }).expect(200);
+    await request(server).get(`${path}/notifications?status=unread`).set(headers(3)).expect(200).expect(({ body }) => expect(body.items).toHaveLength(1));
+    await prisma.learningDelivery.updateMany({ where: { status: { in: ['queued', 'processing'] } }, data: { status: 'skipped', lockToken: null, lockedUntil: null } });
+    await request(server).patch(`${path}/notification-preferences`).set(headers(3)).send({ emailEnabled: true }).expect(200);
+    const createNotice = (key: string, recipientUserId = student.id, recipientRole = 'student', targetType = 'progress', targetId = enrollment.id) => prisma.learningNotification.create({ data: { workspaceId: workspace.id, recipientUserId, recipientRole, eventKey: key, type: 'progress.updated', targetType, targetId, title: 'Изменён учебный результат', delivery: { create: {} } }, include: { delivery: true } });
+    const retryNotice = await createNotice('worker-retry');
+    const mailer = app.get(AuthMailerService);
+    const send = vi.spyOn(mailer, 'sendLearningNotification').mockRejectedValue({ code: 'EAUTH', message: 'secret-smtp-data' });
+    const { LearningDeliveryWorker } = await import('../../src/learning/learning-delivery.worker');
+    const worker = app.get(LearningDeliveryWorker);
+    await worker.runBatch(1);
+    let delivery = await prisma.learningDelivery.findUniqueOrThrow({ where: { id: retryNotice.delivery.id } });
+    expect(delivery).toMatchObject({ status: 'queued', attempts: 1, lastErrorCode: 'EAUTH' });
+    expect(JSON.stringify(delivery)).not.toContain('secret-smtp-data');
+    await prisma.learningDelivery.update({ where: { id: delivery.id }, data: { attempts: 4, availableAt: new Date(0) } });
+    await worker.runBatch(1);
+    delivery = await prisma.learningDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
+    expect(delivery).toMatchObject({ status: 'failed', attempts: 5 });
+    await request(server).get(`${path}/notification-deliveries`).set(headers(3)).expect(403);
+    await request(server).get(`${path}/notification-deliveries?status=failed`).set(headers(0)).expect(200).expect(({ body }) => { expect(body.items).toHaveLength(1); expect(body.items[0]).not.toHaveProperty('lockToken'); });
+    await request(server).post(`${path}/notification-deliveries/${delivery.id}/retry`).set(headers(0)).set('If-Match', String(delivery.revision)).send({ reason: 'Настройки SMTP исправлены' }).expect(200);
+    send.mockResolvedValue({ status: 'dev_preview', provider: 'noop' });
+    await worker.runBatch(1);
+    expect(await prisma.learningDelivery.findUnique({ where: { id: delivery.id } })).toMatchObject({ status: 'dev_preview', attempts: 1, provider: 'noop' });
+    const leaseNotice = await createNotice('expired-lease');
+    await prisma.learningDelivery.update({ where: { id: leaseNotice.delivery.id }, data: { status: 'processing', attempts: 1, lockedUntil: new Date(0), lockToken: 'expired-worker' } });
+    const { LearningAccessService } = await import('../../src/learning/learning-access.service');
+    const { ConfigService } = await import('@nestjs/config');
+    const competitor = new LearningDeliveryWorker(app.get(LearningAccessService), mailer, app.get(ConfigService));
+    send.mockClear();
+    const claimed = await Promise.all([worker.runBatch(1), competitor.runBatch(1)]);
+    expect(claimed.reduce((sum, count) => sum + count, 0)).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await prisma.learningDelivery.findUnique({ where: { id: leaseNotice.delivery.id } })).toMatchObject({ status: 'dev_preview', attempts: 2, lockToken: null });
+    const removedTeacherNotice = await createNotice('revoked-target', teacher.id, 'teacher', 'course', course.id);
+    await prisma.learningNotificationPreference.create({ data: { workspaceId: workspace.id, userId: teacher.id, emailEnabled: true } });
+    await prisma.courseTeacher.update({ where: { id: firstTeacher.id }, data: { status: 'ended' } });
+    await request(server).get(`${path}/notifications/${removedTeacherNotice.id}/target`).set(headers(1)).expect(404);
+    send.mockClear();
+    await worker.runBatch(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(await prisma.learningDelivery.findUnique({ where: { id: removedTeacherNotice.delivery.id } })).toMatchObject({ status: 'skipped', lastErrorCode: 'access_revoked' });
+    send.mockRestore();
+    await request(server).get('/internal/metrics').set('Authorization', 'Bearer test-metrics-token-longer-than-32-characters').expect(200)
+      .expect(response => { expect(response.text).toMatch(/^oge_learning_delivery_failures_total [2-9]\d*$/m); expect(response.text).toMatch(/^oge_learning_delivery_queued \d+$/m); });
+    expect(retracted.body.item.kind).toBe('retraction');
   });
 });

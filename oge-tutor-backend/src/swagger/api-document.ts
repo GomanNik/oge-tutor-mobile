@@ -16,13 +16,14 @@ import * as ProgramCatalog from '../program-catalog/program-catalog.dto';
 import * as Courses from '../courses/courses.dto';
 import * as CourseLessons from '../course-lessons/course-lessons.dto';
 import * as Assignments from '../assignments/assignments.dto';
+import * as Learning from '../learning/learning.dto';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons), ...Object.values(Assignments),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons), ...Object.values(Assignments), ...Object.values(Learning),
 ];
 const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
@@ -119,6 +120,24 @@ Object.assign(contracts, {
   'get /api/v2/task-mappings': { response: 'V2TaskMappingPage' },
   'post /api/v2/task-mappings': { request: 'CreateTaskMappingDto', response: 'V2TaskMappingMutation' },
   'post /api/v2/task-mappings/{}/revoke': { request: 'RevokeTaskMappingDto', response: 'V2TaskMappingMutation' },
+} satisfies OperationContracts);
+Object.assign(contracts, {
+  'get /api/v2/workspaces/{}/enrollments/{}/progress': { response: 'V2ProgressDetail' },
+  'get /api/v2/workspaces/{}/enrollments/{}/progress/events': { response: 'V2ProgressEventPage' },
+  'post /api/v2/workspaces/{}/enrollments/{}/progress/assessments': { request: 'CreateAssessmentDto', response: 'V2ProgressEventMutation' },
+  'get /api/v2/workspaces/{}/students/{}/program-progress': { response: 'V2ProgramProgressDetail' },
+  'get /api/v2/workspaces/{}/notifications': { response: 'V2LearningNotificationPage' },
+  'patch /api/v2/workspaces/{}/notifications/{}': { request: 'MarkNotificationDto', response: 'V2LearningNotificationMutation' },
+  'post /api/v2/workspaces/{}/notifications/read-all': { request: 'ReadAllNotificationsDto', response: 'V2LearningNotificationReadAll' },
+  'get /api/v2/workspaces/{}/notifications/{}/target': { response: 'V2LearningTargetDetail' },
+  'get /api/v2/workspaces/{}/notification-preferences': { response: 'V2NotificationPreferenceDetail' },
+  'patch /api/v2/workspaces/{}/notification-preferences': { request: 'NotificationPreferenceDto', response: 'V2NotificationPreferenceMutation' },
+  'get /api/v2/workspaces/{}/notification-deliveries': { response: 'V2LearningDeliveryPage' },
+  'post /api/v2/workspaces/{}/notification-deliveries/{}/retry': { request: 'RetryDeliveryDto', response: 'V2LearningDeliveryRetry' },
+  'get /api/v2/me/notifications': { response: 'V2LearningNotificationPage' },
+  'patch /api/v2/me/notifications/{}': { request: 'MarkNotificationDto', response: 'V2LearningNotificationMutation' },
+  'post /api/v2/me/notifications/read-all': { request: 'ReadAllNotificationsDto', response: 'V2LearningNotificationReadAll' },
+  'get /api/v2/me/notifications/{}/target': { response: 'V2LearningTargetDetail' },
 } satisfies OperationContracts);
 Object.assign(contracts, {
   'get /api/v2/workspaces/{}/courses': { response: 'V2CoursePage' },
@@ -220,7 +239,7 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
         operation.parameters.push({ name: 'x-request-id', in: 'header', required: false, schema: { type: 'string' }, description: 'Optional correlation identifier, echoed in error responses.' });
       }
       if (path.startsWith('/api/v2/') && method !== 'get') {
-        const isRevisionMutation = method === 'patch' || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete)$/.test(path)
+        const isRevisionMutation = (method === 'patch' && !path.endsWith('/notification-preferences')) || /\/(revoke|suspend|resume|resend|archive|publish|activate|pause|complete)$/.test(path)
           || /\/workspaces\/[^/]+\/(?:assignments\/[^/]+\/(?:close|recipients)|assignment-recipients\/[^/]+\/submissions|submissions\/[^/]+\/reviews|materials\/[^/]+\/publications\/[^/]+\/revoke)$/.test(path)
           || /\/program-versions\/[^/]+\/tasks(?:\/[^/]+)?$/.test(path) || /\/program-versions\/[^/]+\/scoring-rule$/.test(path);
         const isIdempotentMutation = /\/invitations$|\/roles$/.test(path) || /\/api\/v2\/(subjects|programs|task-mappings)$/.test(path)

@@ -4,6 +4,7 @@ import CatalogPanel from './CatalogPanel.jsx';
 import CoursesPanel from './CoursesPanel.jsx';
 import LessonsPanel from './LessonsPanel.jsx';
 import AssignmentsPanel from './AssignmentsPanel.jsx';
+import { NotificationsPanel, ProgressPanel } from './LearningPanel.jsx';
 
 const MODE_KEY = 'oge-tutor-workspace-context';
 const ROLES = ['admin', 'teacher', 'student'];
@@ -185,12 +186,22 @@ export default function WorkspaceApp({ onLegacy }) {
   const api = useMemo(() => createWorkspaceClient(), []);
   const [me, setMe] = useState(null);
   const [contexts, setContexts] = useState([]);
-  const [selectedKey, setSelectedKey] = useState(() => window.sessionStorage.getItem(MODE_KEY) || '');
+  const [selectedKey, setSelectedKey] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('workspaceId') && ROLES.includes(params.get('role')) ? `${params.get('workspaceId')}:${params.get('role')}` : window.sessionStorage.getItem(MODE_KEY) || '';
+  });
   const [loading, setLoading] = useState(api.hasToken());
   const [contextRefreshing, setContextRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState('home');
+  const [view, setView] = useState(() => new URLSearchParams(window.location.search).has('notification') ? 'notifications' : 'home');
+  const [emailNotice, setEmailNotice] = useState(() => new URLSearchParams(window.location.search).get('notification') || '');
+  const [openedTarget, setOpenedTarget] = useState(null);
+  const openNotificationTarget = useCallback(target => {
+    setOpenedTarget(target); setEmailNotice('');
+    setView({ lesson: 'lessons', assignment: 'assignments', material: 'assignments', progress: 'progress', course: 'courses' }[target.type] || 'notifications');
+    if (new URLSearchParams(window.location.search).has('notification')) window.history.replaceState({}, '', window.location.pathname);
+  }, []);
   const [inviteToken, setInviteToken] = useState(() => {
     if (window.location.pathname !== '/workspace-invite') return '';
     const token = new URLSearchParams(window.location.search).get('token') || '';
@@ -260,26 +271,40 @@ export default function WorkspaceApp({ onLegacy }) {
   function select(context) {
     const key = `${context.workspaceId}:${context.role}`;
     setSelectedKey(key); window.sessionStorage.setItem(MODE_KEY, key);
-    setView('home');
+    setView('home'); setOpenedTarget(null); setEmailNotice('');
   }
+  function navigate(nextView) { setOpenedTarget(null); setEmailNotice(''); setView(nextView); }
 
   const choices = contexts.flatMap(context => context.roles.map(role => ({ workspaceId: context.workspaceId, name: context.name, legacyRole: context.legacyRole, role })));
   const current = choices.find(choice => `${choice.workspaceId}:${choice.role}` === selectedKey) || choices[0];
   const context = current ? { workspaceId: current.workspaceId, role: current.role } : null;
   const activeView = !context && me?.catalogManage ? 'globalCatalog' : view;
+  const panelKey = context ? `${context.workspaceId}:${context.role}:${openedTarget?.id || ''}` : 'global';
+  let content = <main className="workspace-empty"><h1>Нет доступных пространств</h1></main>;
+  if (contextRefreshing) content = <main className="workspace-empty"><p>Обновляем доступ…</p></main>;
+  else if (activeView === 'globalCatalog' && me?.catalogManage) content = <CatalogPanel key="global" api={api} context={null} canManage onAccessError={onAccessError} />;
+  else if (context) {
+    if (activeView === 'catalog') content = <CatalogPanel key={panelKey} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} />;
+    else if (activeView === 'lessons') content = <LessonsPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} openLessonId={openedTarget?.type === 'lesson' ? openedTarget.id : ''} />;
+    else if (activeView === 'assignments') content = <AssignmentsPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} openTarget={openedTarget} />;
+    else if (activeView === 'progress') content = <ProgressPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} currentUserId={me?.id} openEnrollmentId={openedTarget?.type === 'progress' ? openedTarget.id : ''} />;
+    else if (activeView === 'notifications') content = <NotificationsPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} onOpen={openNotificationTarget} initialNotificationId={emailNotice} />;
+    else if (activeView === 'courses' || context.role !== 'admin') content = <CoursesPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} legacyRole={current?.legacyRole} onLegacy={onLegacy} openCourseId={openedTarget?.type === 'course' ? openedTarget.id : ''} />;
+    else content = <AdminPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} />;
+  }
 
   if (loading) return <div className="workspace-auth-page"><p>Загрузка…</p></div>;
   if (inviteToken) return <InvitationAccept token={inviteToken} api={api} onAccepted={accept} me={me} onLogin={login} busy={busy} error={error} />;
   if (!me) return <Login onLogin={(email, password) => { void login(email, password).catch(() => {}); }} busy={busy} error={error} />;
   return <div className="workspace-page">
     <header className="workspace-header"><div><span className="workspace-mark">OGE Tutor</span><strong>{activeView === 'globalCatalog' ? 'Общий каталог' : current?.name || 'Кабинет'}</strong></div><div className="workspace-header-actions">
-      {context && <div className="workspace-view-nav">{context.role === 'admin' && <button type="button" aria-current={activeView === 'home' ? 'page' : undefined} onClick={() => setView('home')}>Кабинет</button>}<button type="button" aria-current={activeView === 'courses' || (activeView === 'home' && context.role !== 'admin') ? 'page' : undefined} onClick={() => setView('courses')}>Курсы</button><button type="button" aria-current={activeView === 'lessons' ? 'page' : undefined} onClick={() => setView('lessons')}>Расписание</button><button type="button" aria-current={activeView === 'assignments' ? 'page' : undefined} onClick={() => setView('assignments')}>Работы</button><button type="button" aria-current={activeView === 'catalog' ? 'page' : undefined} onClick={() => setView('catalog')}>Каталог</button></div>}
-      {me.catalogManage && <button type="button" aria-current={activeView === 'globalCatalog' ? 'page' : undefined} onClick={() => setView('globalCatalog')}>Общий каталог</button>}
+      {context && <div className="workspace-view-nav">{context.role === 'admin' && <button type="button" aria-current={activeView === 'home' ? 'page' : undefined} onClick={() => navigate('home')}>Кабинет</button>}<button type="button" aria-current={activeView === 'courses' || (activeView === 'home' && context.role !== 'admin') ? 'page' : undefined} onClick={() => navigate('courses')}>Курсы</button><button type="button" aria-current={activeView === 'lessons' ? 'page' : undefined} onClick={() => navigate('lessons')}>Расписание</button><button type="button" aria-current={activeView === 'assignments' ? 'page' : undefined} onClick={() => navigate('assignments')}>Работы</button><button type="button" aria-current={activeView === 'progress' ? 'page' : undefined} onClick={() => navigate('progress')}>Прогресс</button><button type="button" aria-current={activeView === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}>Уведомления</button><button type="button" aria-current={activeView === 'catalog' ? 'page' : undefined} onClick={() => navigate('catalog')}>Каталог</button></div>}
+      {me.catalogManage && <button type="button" aria-current={activeView === 'globalCatalog' ? 'page' : undefined} onClick={() => navigate('globalCatalog')}>Общий каталог</button>}
       {choices.length > 0 && <label>Контекст<select aria-label="Рабочее пространство и роль" value={current ? `${current.workspaceId}:${current.role}` : ''} onChange={event => { const choice = choices.find(item => `${item.workspaceId}:${item.role}` === event.target.value); if (choice) select(choice); }}>
         {choices.map(choice => <option key={`${choice.workspaceId}:${choice.role}`} value={`${choice.workspaceId}:${choice.role}`}>{choice.name} · {ROLE_LABELS[choice.role]}</option>)}
       </select></label>}
       <button type="button" onClick={logout}>Выйти</button>
     </div></header>
-    {contextRefreshing ? <main className="workspace-empty"><p>Обновляем доступ…</p></main> : activeView === 'globalCatalog' && me.catalogManage ? <CatalogPanel key="global" api={api} context={null} canManage onAccessError={onAccessError} /> : activeView === 'catalog' && context ? <CatalogPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} /> : activeView === 'lessons' && context ? <LessonsPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : activeView === 'assignments' && context ? <AssignmentsPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : context && (activeView === 'courses' || (activeView === 'home' && context.role !== 'admin')) ? <CoursesPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} legacyRole={current?.legacyRole} onLegacy={onLegacy} /> : context?.role === 'admin' ? <AdminPanel key={`${context.workspaceId}:${context.role}`} api={api} context={context} onAccessError={onAccessError} /> : <main className="workspace-empty"><h1>Нет доступных пространств</h1></main>}
+    {content}
   </div>;
 }
