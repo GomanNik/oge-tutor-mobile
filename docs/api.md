@@ -65,6 +65,22 @@ The routes start with `/api/v2/workspaces/:workspaceId`, require Bearer auth and
 
 Writes use `If-Match` where a revision is required; create/publish/submit operations use `Idempotency-Key`. Invalid revision gives 412 or 428; a duplicate key with a different body gives 409. Historic v1 homework and materials are imported as read-only v2 records and remain editable through v1 during the compatibility period.
 
+## Progress and notifications v2 (Block 6)
+
+The workspace prefix is `/api/v2/workspaces/:workspaceId`; Bearer auth and `X-Active-Role` select the active context. See the [Block 6 contract](platform/block-6-progress-notifications.md).
+
+| Routes | Purpose |
+|---|---|
+| `GET /enrollments/:id/progress`, `GET /enrollments/:id/progress/events` | Published projection and cursor-paginated evidence history; private assessments are visible only to their author. |
+| `POST /enrollments/:id/progress/assessments` | Teacher assessment/diagnostic, correction or retraction with `Idempotency-Key`; history is immutable. |
+| `GET /students/:userId/program-progress?programVersionId=` | Separate results for each authorized course of exactly one program version. |
+| `GET /notifications`, `PATCH /notifications/:id`, `POST /notifications/read-all` | Recipient-only list/count, revision-checked read state and read-all up to an explicit timestamp. |
+| `GET /notifications/:id/target` | Recheck access before opening a resource. |
+| `GET/PATCH /notification-preferences` | Explicit email opt-in; disabled by default. |
+| `GET /notification-deliveries`, `POST /notification-deliveries/:id/retry` | Administrator delivery states and revision-checked retry with a reason. |
+
+The notification list/read/target routes are also available under `/api/v2/me/notifications` with a required `workspaceId` query. Cursor pages return `{ items, pageInfo: { nextCursor, hasMore } }`. Notification lists also include `unreadCount` and `asOf`; use `asOf` as the read-all `before` value. Mutations return `{ item, changed, requestId }`. Notification preferences do not require `If-Match`. SMTP runs after commit through a leased outbox; local `noop` returns `dev_preview`.
+
 ## Response Contract
 
 - `POST /auth/login` and `GET /bootstrap` return `{ session, data, pagination }`. `data` contains the first page (25 items) of `students`, `lessons`, `homeworks`, `materials`, and `notifications`, plus the teacher profile where applicable.

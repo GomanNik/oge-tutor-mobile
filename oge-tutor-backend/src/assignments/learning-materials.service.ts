@@ -4,6 +4,7 @@ import { forbidden, notFound, validationError } from '../common/app-error';
 import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { CreateLearningMaterialDto, MaterialQueryDto, PublishMaterialDto, UpdateLearningMaterialDto, WorkReasonDto } from './assignments.dto';
 import { checkRevision, fileDto, WorkAccessService, workConflict, WorkTx } from './work-access.service';
+import { LearningEventsService } from '../learning/learning-events.service';
 
 const include = { file: true, programVersion: { include: { program: { include: { subject: true } } } } } satisfies Prisma.LearningMaterialInclude;
 type Row = Prisma.LearningMaterialGetPayload<{ include: typeof include }>;
@@ -12,7 +13,7 @@ const changed = <T>(ctx: WorkspaceContext, item: T) => ({ item, changed: ['mater
 
 @Injectable()
 export class LearningMaterialsService {
-  constructor(private readonly access: WorkAccessService) {}
+  constructor(private readonly access: WorkAccessService, private readonly learning: LearningEventsService) {}
   private scope(ctx: WorkspaceContext): Prisma.LearningMaterialWhereInput {
     if (ctx.role === 'student') return { workspaceId: ctx.workspaceId, archivedAt: null, publications: { some: { revokedAt: null, course: { status: 'active' }, recipients: { some: { enrollment: { status: 'active', membership: { userId: ctx.userId } } } } } } };
     return { workspaceId: ctx.workspaceId, ...(ctx.role === 'teacher' ? { OR: [{ createdByUserId: ctx.userId }, { publications: { some: { revokedAt: null, course: this.access.teacherScope(ctx) } } }] } : {}) };
@@ -102,6 +103,7 @@ export class LearningMaterialsService {
         await tx.materialPublicationRecipient.createMany({ data: body.recipientEnrollmentIds.map(enrollmentId => ({ publicationId: publication.id, courseId: course.id, enrollmentId })) });
         const updated = await tx.learningMaterial.update({ where: { id }, data: { revision: { increment: 1 } }, include });
         await this.access.audit(tx, ctx, 'material', id, 'material.published', { courseId: course.id, enrollmentIds: body.recipientEnrollmentIds });
+        await this.learning.notifyEnrollments(tx, ctx, `material-publication:${publication.id}`, course.id, body.recipientEnrollmentIds, 'material.published', { type: 'material', id }, 'Опубликован учебный материал');
         return changed(ctx, dto(updated));
       });
     });
@@ -118,6 +120,8 @@ export class LearningMaterialsService {
       await tx.materialPublication.update({ where: { id: publicationId }, data: { revokedAt: new Date(), revision: { increment: 1 } } });
       const updated = await tx.learningMaterial.update({ where: { id }, data: { revision: { increment: 1 } }, include });
       await this.access.audit(tx, ctx, 'material_publication', publicationId, 'material.publication_revoked', {}, body.reason.trim());
+      const recipients = await tx.materialPublicationRecipient.findMany({ where: { publicationId } });
+      await this.learning.notifyEnrollments(tx, ctx, `material-publication:${publicationId}:revoked`, publication.courseId, recipients.map(r => r.enrollmentId), 'material.revoked', { type: 'material', id }, 'Отозван доступ к материалу');
       return changed(ctx, dto(updated));
     });
   }
@@ -126,9 +130,11 @@ export class LearningMaterialsService {
       const row = await this.editable(tx, ctx, id);
       checkRevision(row.revision, revision);
       if (row.archivedAt) throw workConflict('invalid_state', 'Материал уже в архиве.');
+      const publications = await tx.materialPublication.findMany({ where: { materialId: id, revokedAt: null }, include: { recipients: true } });
       await tx.materialPublication.updateMany({ where: { materialId: id, revokedAt: null }, data: { revokedAt: new Date(), revision: { increment: 1 } } });
       const updated = await tx.learningMaterial.update({ where: { id }, data: { archivedAt: new Date(), revision: { increment: 1 } }, include });
       await this.access.audit(tx, ctx, 'material', id, 'material.archived', {}, body.reason.trim());
+      for (const publication of publications) await this.learning.notifyEnrollments(tx, ctx, `material:${id}:archived`, publication.courseId, publication.recipients.map(r => r.enrollmentId), 'material.archived', { type: 'material', id }, 'Материал перенесён в архив');
       return changed(ctx, dto(updated));
     });
   }

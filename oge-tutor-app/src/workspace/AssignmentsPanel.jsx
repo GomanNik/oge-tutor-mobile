@@ -325,7 +325,7 @@ function MaterialDetail({ api, context, item, courses, onBack, onChanged, onAcce
   </section>;
 }
 
-export default function AssignmentsPanel({ api, context, onAccessError }) {
+export default function AssignmentsPanel({ api, context, onAccessError, openTarget = null }) {
   const [tab, setTab] = useState('assignments');
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState('');
@@ -339,6 +339,15 @@ export default function AssignmentsPanel({ api, context, onAccessError }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!openTarget) return;
+    let alive = true;
+    const material = openTarget.type === 'material';
+    (material ? api.learningMaterial(context, openTarget.id) : api.assignment(context, openTarget.id))
+      .then(result => { if (alive) { setTab(material ? 'materials' : 'assignments'); setSelected(result.item); } })
+      .catch(err => { if (alive) { setError(errorText(err)); onAccessError(err); } });
+    return () => { alive = false; };
+  }, [api, context, openTarget, onAccessError]);
   useEffect(() => {
     let alive = true;
     api.courses(context, { pageSize: 100 }).then(result => { if (alive) setCourses(result.items); })

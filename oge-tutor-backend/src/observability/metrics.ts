@@ -6,7 +6,7 @@ import { Public } from '../auth/public.decorator';
 import { notFound } from '../common/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 
-const counters = { loginFailures: 0, accessDenials: 0, outboxDeliveryFailures: 0 };
+const counters = { loginFailures: 0, accessDenials: 0, outboxDeliveryFailures: 0, learningDeliveryFailures: 0 };
 
 export function recordHttpFailure(path: string, status: number) {
   if (status === 401 && (path === '/auth/login' || path === '/api/v2/auth/login')) counters.loginFailures += 1;
@@ -16,6 +16,7 @@ export function recordHttpFailure(path: string, status: number) {
 export function recordOutboxDeliveryFailure() {
   counters.outboxDeliveryFailures += 1;
 }
+export function recordLearningDeliveryFailure() { counters.learningDeliveryFailures += 1; }
 
 function equalToken(provided: string, configured: string) {
   const actual = Buffer.from(provided);
@@ -34,9 +35,12 @@ export class MetricsController {
   async metrics(@Headers('authorization') authorization?: string) {
     const configured = this.config.get<string>('METRICS_TOKEN');
     if (!configured || !authorization?.startsWith('Bearer ') || !equalToken(authorization.slice(7), configured)) throw notFound();
-    const [queued, failed] = await Promise.all([
+    const [queued, failed, learningQueued, learningFailed, oldest] = await Promise.all([
       this.prisma.workspaceEmailOutbox.count({ where: { sentAt: null, canceledAt: null } }),
       this.prisma.workspaceEmailOutbox.count({ where: { sentAt: null, canceledAt: null, invitation: { deliveryStatus: 'failed' } } }),
+      this.prisma.learningDelivery.count({ where: { status: { in: ['queued', 'processing'] } } }),
+      this.prisma.learningDelivery.count({ where: { status: 'failed' } }),
+      this.prisma.learningDelivery.findFirst({ where: { status: { in: ['queued', 'processing'] } }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } }),
     ]);
     return [
       '# TYPE oge_login_failures_total counter',
@@ -49,6 +53,14 @@ export class MetricsController {
       `oge_invitation_outbox_queued ${queued}`,
       '# TYPE oge_invitation_outbox_failed gauge',
       `oge_invitation_outbox_failed ${failed}`,
+      '# TYPE oge_learning_delivery_failures_total counter',
+      `oge_learning_delivery_failures_total ${counters.learningDeliveryFailures}`,
+      '# TYPE oge_learning_delivery_queued gauge',
+      `oge_learning_delivery_queued ${learningQueued}`,
+      '# TYPE oge_learning_delivery_failed gauge',
+      `oge_learning_delivery_failed ${learningFailed}`,
+      '# TYPE oge_learning_delivery_oldest_seconds gauge',
+      `oge_learning_delivery_oldest_seconds ${oldest ? Math.max(0, Math.floor((Date.now() - oldest.createdAt.getTime()) / 1000)) : 0}`,
       '',
     ].join('\n');
   }

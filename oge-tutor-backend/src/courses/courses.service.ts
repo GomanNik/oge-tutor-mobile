@@ -4,6 +4,7 @@ import { CourseStatus, EnrollmentStatus, Prisma } from '@prisma/client';
 import { AppError, forbidden, notFound, validationError } from '../common/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceContext, WorkspaceContextService } from '../workspace/workspace-context.service';
+import { LearningEventsService } from '../learning/learning-events.service';
 import { AddCourseTeacherDto, CourseQueryDto, CreateCourseDto, CreateEnrollmentDto, EnrollmentBatchDto, UpdateCourseDto, UpdateCourseTeacherDto, UpdateEnrollmentDto } from './courses.dto';
 
 const courseInclude = {
@@ -72,7 +73,7 @@ function enrollmentDto(row: EnrollmentRow, role: WorkspaceContext['role']) {
 
 @Injectable()
 export class CoursesService {
-  constructor(private readonly prisma: PrismaService, private readonly contexts: WorkspaceContextService) {}
+  constructor(private readonly prisma: PrismaService, private readonly contexts: WorkspaceContextService, private readonly learning: LearningEventsService) {}
 
   private scope(ctx: WorkspaceContext): Prisma.CourseWhereInput {
     if (ctx.role === 'admin') return { workspaceId: ctx.workspaceId };
@@ -269,6 +270,7 @@ export class CoursesService {
         await tx.enrollment.updateMany({ where: { courseId: id, status: 'invited' }, data: { status: 'withdrawn', endsOn: today(), revision: { increment: 1 } } });
       }
       await this.audit(tx, ctx, 'course', id, `course.${action}`, { from: course.status, to: next });
+      await this.learning.courseChanged(tx, ctx, id, `course:${id}:${revision + 1}:state`, 'course.state_changed', 'Изменён статус курса');
       return { item: courseDto(await tx.course.findUniqueOrThrow({ where: { id }, include: courseInclude }), ctx.role), changed: ['courses', ...(['complete', 'archive'].includes(action) ? ['enrollments'] : [])], requestId: ctx.requestId };
     });
   }
@@ -287,6 +289,7 @@ export class CoursesService {
       if (await tx.courseTeacher.count({ where: { courseId, membershipId: member.id, status: 'active' } })) throw conflict('duplicate_link', 'Преподаватель уже назначен.');
       const row = await tx.courseTeacher.create({ data: { workspaceId: ctx.workspaceId, courseId, membershipId: member.id, role: body.role, startsOn: today() }, include: teacherInclude });
       await this.audit(tx, ctx, 'course_teacher', row.id, 'course.teacher_added', { courseId, teacherUserId: body.teacherUserId, role: body.role });
+      await this.learning.courseChanged(tx, ctx, courseId, `course-teacher:${row.id}:created`, 'course.teacher_added', 'Изменён состав преподавателей курса', [body.teacherUserId]);
       return { item: teacherDto(row), changed: ['courseTeachers'], requestId: ctx.requestId };
     });
   }
@@ -311,6 +314,7 @@ export class CoursesService {
       if (!changed.count) throw revisionError();
       const row = await tx.courseTeacher.findUniqueOrThrow({ where: { id: linkId }, include: teacherInclude });
       await this.audit(tx, ctx, 'course_teacher', linkId, 'course.teacher_updated', { role: row.role, status: row.status });
+      await this.learning.courseChanged(tx, ctx, courseId, `course-teacher:${row.id}:${row.revision}`, 'course.teacher_updated', 'Изменён состав преподавателей курса', [row.membership.userId]);
       return { item: teacherDto(row), changed: ['courseTeachers'], requestId: ctx.requestId };
     });
   }
@@ -345,6 +349,8 @@ export class CoursesService {
         goal: body.goal?.trim() || '', note: body.note?.trim() || '', createdByUserId: ctx.userId,
       }, include: enrollmentInclude });
       await this.audit(tx, ctx, 'enrollment', row.id, 'course.enrollment_added', { courseId, studentUserId: body.studentUserId, status });
+      await this.learning.notifyEnrollments(tx, ctx, `enrollment:${row.id}:created`, courseId, [row.id], 'course.enrollment_added', { type: 'course', id: courseId }, 'Добавлено участие в курсе');
+      await this.learning.notifyTeachers(tx, ctx, `enrollment:${row.id}:created`, courseId, 'course.enrollment_added', { type: 'course', id: courseId }, 'Добавлен участник курса');
       return { item: enrollmentDto(row, ctx.role), changed: ['enrollments', 'courses'], requestId: ctx.requestId };
     });
   }
@@ -380,6 +386,10 @@ export class CoursesService {
       if (!changed.count) throw revisionError();
       const row = await tx.enrollment.findUniqueOrThrow({ where: { id }, include: enrollmentInclude });
       await this.audit(tx, ctx, 'enrollment', id, 'course.enrollment_updated', { courseId, status: row.status });
+      if (body.status) {
+        await this.learning.notifyEnrollments(tx, ctx, `enrollment:${id}:${row.revision}`, courseId, [id], 'course.enrollment_updated', { type: 'course', id: courseId }, 'Изменён статус участия в курсе');
+        await this.learning.notifyTeachers(tx, ctx, `enrollment:${id}:${row.revision}`, courseId, 'course.enrollment_updated', { type: 'course', id: courseId }, 'Изменён статус участия в курсе');
+      }
       return { item: enrollmentDto(row, ctx.role), changed: ['enrollments', 'courses'], requestId: ctx.requestId };
     });
   }
@@ -438,6 +448,8 @@ export class CoursesService {
         items.push(enrollmentDto(row, ctx.role));
       }
       await this.audit(tx, ctx, 'course', course.id, 'course.enrollment_batch_added', { courseId: course.id, count: items.length });
+      await this.learning.notifyEnrollments(tx, ctx, `enrollment-batch:${items[0]?.id}`, course.id, items.map(item => item.id), 'course.enrollment_added', { type: 'course', id: course.id }, 'Добавлено участие в курсе');
+      await this.learning.notifyTeachers(tx, ctx, `enrollment-batch:${items[0]?.id}`, course.id, 'course.enrollment_batch_added', { type: 'course', id: course.id }, 'Обновлён состав курса');
       return { courseId: course.id, items, appliedCount: items.length, changed: ['enrollments', 'courses'], requestId: ctx.requestId };
     });
   }

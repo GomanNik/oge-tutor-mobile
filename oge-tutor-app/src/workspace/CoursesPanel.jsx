@@ -288,7 +288,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
   </div>;
 }
 
-export default function CoursesPanel({ api, context, onAccessError, legacyRole, onLegacy }) {
+export default function CoursesPanel({ api, context, onAccessError, legacyRole, onLegacy, openCourseId = '' }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -304,6 +304,7 @@ export default function CoursesPanel({ api, context, onAccessError, legacyRole, 
   const sequence = useRef(0);
 
   useEffect(() => { setPage(1); setRows([]); setSelectedId(''); setSelected(null); }, [context, query, status, format]);
+  useEffect(() => { if (openCourseId) setSelectedId(openCourseId); }, [openCourseId, context]);
   useEffect(() => {
     const current = ++sequence.current;
     let alive = true;

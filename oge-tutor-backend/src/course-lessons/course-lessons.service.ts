@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { CancelCourseLessonDto, CompleteCourseLessonDto, CorrectLessonAttendanceDto, CreateCourseLessonDto, LessonCalendarQueryDto, UpdateCourseLessonDto } from './course-lessons.dto';
 import { lessonConflicts, lockLessonPeople } from './lesson-schedule';
+import { LearningEventsService } from '../learning/learning-events.service';
 
 const lessonInclude = {
   course: { select: { title: true, workspaceId: true, legacyMapping: true } },
@@ -62,7 +63,7 @@ function dto(row: LessonRow, ctx: WorkspaceContext) {
 
 @Injectable()
 export class CourseLessonsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly learning: LearningEventsService) {}
 
   private scope(ctx: WorkspaceContext): Prisma.LessonWhereInput {
     const course: Prisma.CourseWhereInput = { workspaceId: ctx.workspaceId };
@@ -219,6 +220,7 @@ export class CourseLessonsService {
         await tx.lessonTeacher.createMany({ data: selected.teachers.map(link => ({ lessonId: row.id, courseId: course.id, courseTeacherId: link.id })) });
         await tx.lessonParticipant.createMany({ data: selected.enrollments.map(link => ({ lessonId: row.id, courseId: course.id, enrollmentId: link.id })) });
         await this.audit(tx, ctx, row.id, 'lesson.created', { courseId: course.id, teacherCount: selected.teachers.length, participantCount: selected.enrollments.length });
+        await this.learning.lessonChanged(tx, ctx, row.id, 'created');
         const result = { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id: row.id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
         await tx.idempotencyRecord.create({ data: { ...identity, bodyHash, response: result as Prisma.InputJsonValue, expiresAt: new Date(Date.now() + 86400000) } });
         return result;
@@ -275,6 +277,7 @@ export class CourseLessonsService {
         await tx.lessonParticipant.createMany({ data: selected.enrollments.map(link => ({ lessonId: id, courseId: course.id, enrollmentId: link.id })) });
       }
       await this.audit(tx, ctx, id, 'lesson.updated', { courseId: course.id, participantCount: selected.enrollments.length, teacherCount: selected.teachers.length });
+      await this.learning.lessonChanged(tx, ctx, id, 'updated', [...new Set([...current.participants.map(p => p.enrollmentId), ...participantEnrollmentIds])], '', current.lessonTeachers.map(t => t.courseTeacher.membership.userId));
       return { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
     });
   }
@@ -287,6 +290,7 @@ export class CourseLessonsService {
       const changed = await tx.lesson.updateMany({ where: { id, revision }, data: { status: 'canceled', revision: { increment: 1 } } });
       if (!changed.count) throw revisionError();
       await this.audit(tx, ctx, id, 'lesson.canceled', { reason: body.reason.trim() });
+      await this.learning.lessonChanged(tx, ctx, id, 'canceled');
       return { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
     });
   }
@@ -311,6 +315,7 @@ export class CourseLessonsService {
       } });
       if (!changed.count) throw revisionError();
       await this.audit(tx, ctx, id, 'lesson.completed', { attendance: body.attendance.map(item => ({ enrollmentId: item.enrollmentId, attendance: item.attendance })) });
+      await this.learning.lessonChanged(tx, ctx, id, 'completed');
       return { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
     });
   }
@@ -328,6 +333,7 @@ export class CourseLessonsService {
       const changed = await tx.lesson.updateMany({ where: { id, revision }, data: { revision: { increment: 1 } } });
       if (!changed.count) throw revisionError();
       await this.audit(tx, ctx, id, 'lesson.attendance_corrected', { enrollmentId: body.enrollmentId, from: participant.attendance, to: body.attendance, reason: body.reason.trim() });
+      await this.learning.lessonChanged(tx, ctx, id, 'attendance_corrected', [body.enrollmentId], body.reason.trim());
       return { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
     });
   }

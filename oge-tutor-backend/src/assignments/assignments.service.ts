@@ -4,6 +4,7 @@ import { forbidden, notFound, validationError } from '../common/app-error';
 import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { AssignmentQueryDto, AssignmentRecipientsDto, CreateAssignmentDto, CreateReviewDto, SubmitAssignmentDto, UpdateAssignmentDto, UpdateRecipientDto, WorkPageDto, WorkReasonDto } from './assignments.dto';
 import { checkRevision, fileDto, TaskSnapshot, WorkAccessService, workConflict, WorkTx } from './work-access.service';
+import { LearningEventsService } from '../learning/learning-events.service';
 
 const include = { course: { select: { title: true, workspaceId: true, programVersionId: true, status: true } }, files: { include: { file: true } } } satisfies Prisma.AssignmentInclude;
 type Row = Prisma.AssignmentGetPayload<{ include: typeof include }>;
@@ -18,7 +19,7 @@ const changed = <T>(ctx: WorkspaceContext, item: T) => ({ item, changed: ['assig
 
 @Injectable()
 export class AssignmentsService {
-  constructor(private readonly access: WorkAccessService) {}
+  constructor(private readonly access: WorkAccessService, private readonly learning: LearningEventsService) {}
 
   private scope(ctx: WorkspaceContext): Prisma.AssignmentWhereInput {
     if (ctx.role === 'teacher') return { course: this.access.teacherScope(ctx) };
@@ -93,6 +94,7 @@ export class AssignmentsService {
         await tx.assignmentRecipient.createMany({ data: body.recipientEnrollmentIds.map(enrollmentId => ({ assignmentId: id, courseId: row.courseId, enrollmentId, dueAt: row.dueAt })) });
         const updated = await tx.assignment.update({ where: { id }, data: { status: 'published', publishedAt: row.publishedAt || new Date(), revision: { increment: 1 } }, include });
         await this.access.audit(tx, ctx, 'assignment', id, add ? 'assignment.recipients_added' : 'assignment.published', { enrollmentIds: body.recipientEnrollmentIds });
+        await this.learning.notifyEnrollments(tx, ctx, `assignment:${id}:${updated.revision}:published`, row.courseId, body.recipientEnrollmentIds, 'assignment.published', { type: 'assignment', id }, 'Выдана новая работа');
         return changed(ctx, header(updated, ctx));
       });
     });
@@ -106,6 +108,8 @@ export class AssignmentsService {
       await tx.assignmentRecipient.updateMany({ where: { assignmentId: id, status: { in: ['assigned', 'needs_revision'] } }, data: { status: 'closed', reason: body.reason.trim(), revision: { increment: 1 } } });
       const updated = await tx.assignment.update({ where: { id }, data: { status: archive ? 'archived' : 'closed', closedAt: row.closedAt || new Date(), closeReason: body.reason.trim(), revision: { increment: 1 } }, include });
       await this.access.audit(tx, ctx, 'assignment', id, archive ? 'assignment.archived' : 'assignment.closed', {}, body.reason.trim());
+      const recipients = await tx.assignmentRecipient.findMany({ where: { assignmentId: id }, select: { enrollmentId: true } });
+      await this.learning.notifyEnrollments(tx, ctx, `assignment:${id}:${updated.revision}:closed`, row.courseId, recipients.map(r => r.enrollmentId), 'assignment.closed', { type: 'assignment', id }, archive ? 'Работа перенесена в архив' : 'Работа закрыта');
       return changed(ctx, header(updated, ctx));
     });
   }
@@ -136,6 +140,7 @@ export class AssignmentsService {
       if (body.status === 'assigned') await this.access.recipients(tx, row.courseId, [row.enrollmentId]);
       const updated = await tx.assignmentRecipient.update({ where: { id }, data: { status: body.status, dueAt: body.dueAt ? this.access.future(body.dueAt) : undefined, reason: body.reason.trim(), revision: { increment: 1 } }, include: recipientInclude });
       await this.access.audit(tx, ctx, 'assignment_recipient', id, 'assignment.recipient_updated', { status: updated.status, dueAt: updated.dueAt.toISOString() }, body.reason.trim());
+      await this.learning.notifyEnrollments(tx, ctx, `recipient:${id}:${updated.revision}`, row.courseId, [row.enrollmentId], 'assignment.recipient_updated', { type: 'assignment', id: assignmentId }, 'Изменены условия выполнения работы');
       return changed(ctx, recipientDto(updated, ctx));
     });
   }
@@ -161,6 +166,7 @@ export class AssignmentsService {
         const submission = await tx.assignmentSubmission.create({ data: { recipientId: id, attempt, text: body.text.trim(), contentSnapshot: { title: row.assignment.title, instructions: row.assignment.instructions, tasks: row.assignment.taskSnapshot, fileIds: row.assignment.files.map(f => f.fileId), dueAt: row.dueAt.toISOString() }, files: { create: body.fileIds.map(fileId => ({ fileId })) } } });
         const updated = await tx.assignmentRecipient.update({ where: { id }, data: { status: 'submitted', revision: { increment: 1 } }, include: recipientInclude });
         await this.access.audit(tx, ctx, 'assignment_submission', submission.id, 'assignment.submitted', { recipientId: id, attempt });
+        await this.learning.notifyTeachers(tx, ctx, `submission:${submission.id}`, row.courseId, 'assignment.submitted', { type: 'assignment', id: row.assignmentId }, 'Работа ожидает проверки');
         return changed(ctx, recipientDto(updated, ctx));
       });
     });
@@ -235,6 +241,7 @@ export class AssignmentsService {
         const updated = await tx.assignmentReview.update({ where: { id }, data: { status: 'published', publishedAt: new Date(), revision: { increment: 1 } }, include: reviewInclude });
         await tx.assignmentRecipient.update({ where: { id: recipient.id }, data: { status: review.decision === 'accepted' ? 'reviewed' : 'needs_revision', revision: { increment: 1 } } });
         await this.access.audit(tx, ctx, 'assignment_review', id, 'assignment.review_published', { submissionId: review.submissionId, recipientId: recipient.id, number: review.number, decision: review.decision });
+        await this.learning.reviewPublished(tx, ctx, id);
         return changed(ctx, reviewDto(updated));
       });
     });

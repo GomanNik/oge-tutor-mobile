@@ -2725,3 +2725,24 @@ button:disabled,
   .lesson-attendance-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .lesson-attendance-row select, .lesson-attendance-row button { grid-column: 1 / -1; }
 }
+.learning-panel { min-width: 0; }
+.learning-panel .course-actions button, .learning-panel .workspace-toolbar > button, .learning-event > button {
+  border: 1px solid #a8c4c1; background: #fff; color: #0c5f5a; padding: 8px 12px; font-weight: 700; min-height: 38px;
+}
+.learning-panel .workspace-toolbar label:first-child { flex: 0 1 420px; }
+.learning-panel h1, .learning-panel h2 { overflow-wrap: anywhere; }
+.learning-assessment { margin: 20px 0; border-left: 3px solid #207f68; padding-left: 18px; }
+.learning-checkbox { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
+.learning-checkbox input { width: 18px !important; height: 18px; flex: 0 0 18px; margin: 0 !important; }
+.learning-count { display: inline-block; min-width: 28px; font-size: 16px; color: #576575; }
+.learning-event { padding: 18px 0; border-bottom: 1px solid #dbe1e7; overflow-wrap: anywhere; }
+.learning-event p { margin: 6px 0; }
+.learning-notice { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 12px; border-bottom: 1px solid #dbe1e7; }
+.learning-notice.is-unread { border-left: 3px solid #207f68; background: #f1f8f5; }
+.learning-notice > div { min-width: 0; overflow-wrap: anywhere; }
+.learning-notice time { display: block; color: #647080; font-size: 13px; margin-top: 5px; }
+@media (max-width: 640px) {
+  .learning-notice { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .learning-assessment { padding-left: 12px; }
+  .learning-event .course-section-head { align-items: flex-start; flex-direction: column; gap: 6px; }
+}

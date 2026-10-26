@@ -76,6 +76,9 @@ export class AuthMailerService {
       host: this.config.get<string>('SMTP_HOST'),
       port: Number(this.config.get('SMTP_PORT') || 587),
       secure: this.config.get<boolean>('SMTP_SECURE') === true || this.config.get<string>('SMTP_SECURE') === 'true',
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
       auth: this.config.get<string>('SMTP_USER')
         ? {
             user: this.config.get<string>('SMTP_USER'),
@@ -131,6 +134,26 @@ export class AuthMailerService {
     await this.smtpTransport().sendMail({
       from, to: params.email, subject: title, text,
       html: `<p>${escapeHtml(title)}</p><p><a href="${escapeHtml(params.link)}">Принять приглашение</a></p><p>Ссылка действует до ${escapeHtml(params.expiresAt.toISOString())}.</p>`,
+    });
+    return { status: 'sent', provider: 'smtp' };
+  }
+
+  async sendLearningNotification(params: { email: string; notificationId: string; workspaceId: string; role: string }): Promise<AccessTokenMailResult> {
+    const provider = this.provider();
+    if (provider !== 'smtp') {
+      if (isProduction(this.config)) throw serviceUnavailable('Отправка писем не настроена.', { mailer: 'not_configured' });
+      return { status: 'dev_preview', provider: 'noop' };
+    }
+    const from = this.config.get<string>('SMTP_FROM');
+    if (!from) throw serviceUnavailable('Отправка писем не настроена.', { mailer: 'missing_from' });
+    const url = new URL(this.config.get<string>('APP_FRONTEND_URL') || 'http://localhost:5173');
+    url.searchParams.set('notification', params.notificationId);
+    url.searchParams.set('workspaceId', params.workspaceId);
+    url.searchParams.set('role', params.role);
+    const title = 'Новое уведомление в учебном кабинете';
+    await this.smtpTransport().sendMail({ from, to: params.email, subject: title, messageId: `<learning-${params.notificationId}@${url.hostname}>`,
+      text: `${title}\n\nОткройте кабинет: ${url.href}`,
+      html: `<p>${escapeHtml(title)}</p><p><a href="${escapeHtml(url.href)}">Открыть кабинет</a></p>`,
     });
     return { status: 'sent', provider: 'smtp' };
   }

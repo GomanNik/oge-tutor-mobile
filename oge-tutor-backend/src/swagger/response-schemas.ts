@@ -1,6 +1,6 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import * as C from '../common/contracts';
-import { AssignmentRecipientStatus, AssignmentReviewDecision, AssignmentReviewStatus, AssignmentStatus, CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, LessonAttendance, LessonResponseStatus, LessonStatus, MembershipStatus, ProgramVersionStatus, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
+import { AssignmentRecipientStatus, AssignmentReviewDecision, AssignmentReviewStatus, AssignmentStatus, CatalogStatus, CourseFormat, CourseStatus, CourseTeacherRole, CourseTeacherStatus, DeliveryStatus, EnrollmentStatus, ExamType, InvitationStatus, LearningDeliveryStatus, LearningProgressKind, LearningProgressSource, LearningVisibility, LessonAttendance, LessonResponseStatus, LessonStatus, MembershipStatus, ProgramVersionStatus, ProgressCoverageStatus, ProgressMasteryLevel, ScoringRuleKind, TaskKind, WorkspaceRole, WorkspaceStatus } from '@prisma/client';
 
 type Schema = SchemaObject | ReferenceObject;
 export const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
@@ -146,6 +146,7 @@ Object.assign(responseSchemas, {
     enrollmentIds: array(string), recipientId: string, attempt: integer, submissionId: string,
     number: integer, decision: enumeration(AssignmentReviewDecision), mimeType: string, size: integer,
     dueAt: date,
+    visibility: enumeration(LearningVisibility), supersedesId: { ...string, nullable: true },
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
   V2LoginResponse: strictObject({ session: ref('V2Session'), user: ref('V2User'), contexts: array(ref('V2Context')) }),
@@ -292,4 +293,34 @@ Object.assign(responseSchemas, {
   V2LearningMaterialMutation: v2Mutation(ref('V2LearningMaterial')),
   V2WorkFileMutation: v2Mutation(ref('V2WorkFile')),
   V2WorkFileDeletion: v2Mutation(strictObject({ id: string })),
+});
+
+Object.assign(responseSchemas, {
+  V2ProgressEvidence: strictObject({ lessonId: { ...string, nullable: true }, attendance: enumeration(LessonAttendance), reviewId: string,
+    submissionId: string, assignmentId: string, recipientId: string, decision: enumeration(AssignmentReviewDecision), legacySource: enumeration(C.PROGRESS_SOURCE) }, []),
+  V2ProgressEvent: strictObject({ id: string, enrollmentId: string, taskDefinitionId: { ...string, nullable: true },
+    source: enumeration(LearningProgressSource), kind: enumeration(LearningProgressKind), authorUserId: { ...string, nullable: true }, authorName: { ...string, nullable: true },
+    visibility: enumeration(LearningVisibility), score: { ...integer, nullable: true }, maxScore: { ...integer, nullable: true },
+    coverageStatus: enumeration(ProgressCoverageStatus, true), masteryLevel: enumeration(ProgressMasteryLevel, true), comment: string, basis: string,
+    reason: string, evidence: ref('V2ProgressEvidence'), supersedesId: { ...string, nullable: true }, replacedById: { ...string, nullable: true }, occurredAt: date, recordedAt: date }),
+  V2ProgressTask: strictObject({ taskDefinitionId: string, code: string, title: string, maxScore: { ...integer, nullable: true },
+    event: nullableRef('V2ProgressEvent'), privateEvents: array(ref('V2ProgressEvent')) }),
+  V2EnrollmentProgress: strictObject({ enrollmentId: string, courseId: string, courseTitle: string, programVersionId: string,
+    studentUserId: string, studentName: string, algorithmVersion: string, asOf: date, tasks: array(ref('V2ProgressTask')) }),
+  V2ProgressDetail: detailSchema(ref('V2EnrollmentProgress')),
+  V2ProgressEventPage: v2Page(ref('V2ProgressEvent')),
+  V2ProgressEventMutation: v2Mutation(ref('V2ProgressEvent')),
+  V2ProgramProgressDetail: detailSchema(strictObject({ studentUserId: string, programVersionId: string, algorithmVersion: string, asOf: date, courses: array(ref('V2EnrollmentProgress')) })),
+  V2LearningNotification: strictObject({ id: string, type: string, title: string, message: string, targetType: string, targetId: string,
+    readAt: nullableDate, status: { type: 'string', enum: ['unread', 'read'] }, revision: integer, createdAt: date }),
+  V2LearningNotificationPage: strictObject({ items: array(ref('V2LearningNotification')), pageInfo: v2PageInfo, unreadCount: integer, asOf: date }),
+  V2LearningNotificationMutation: v2Mutation(ref('V2LearningNotification')),
+  V2LearningNotificationReadAll: v2Mutation(strictObject({ updatedCount: integer })),
+  V2LearningTargetDetail: detailSchema(strictObject({ type: string, id: string, title: string, courseId: { ...string, nullable: true }, enrollmentId: { ...string, nullable: true } })),
+  V2NotificationPreferenceDetail: detailSchema(strictObject({ emailEnabled: boolean, updatedAt: nullableDate })),
+  V2NotificationPreferenceMutation: v2Mutation(strictObject({ emailEnabled: boolean, updatedAt: date })),
+  V2LearningDelivery: strictObject({ id: string, notificationId: string, recipientUserId: string, type: string, status: enumeration(LearningDeliveryStatus),
+    attempts: integer, availableAt: date, lockedUntil: nullableDate, lastErrorCode: string, provider: string, deliveredAt: nullableDate, revision: integer, createdAt: date }),
+  V2LearningDeliveryPage: v2Page(ref('V2LearningDelivery')),
+  V2LearningDeliveryRetry: v2Mutation(strictObject({ id: string, status: enumeration(LearningDeliveryStatus), revision: integer })),
 });
