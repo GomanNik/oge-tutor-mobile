@@ -1838,6 +1838,11 @@ describeIfDb('AppModule e2e production flows', () => {
       await request(server).post('/api/v2/auth/access-token/complete').send({ token: anotherReset.body.reset.token, password: 'я'.repeat(40) }).expect(422);
       await request(server).post('/api/v2/auth/access-token/complete').send({ token: anotherReset.body.reset.token, password: 'reset-cutover-password' }).expect(200);
       await request(server).post('/api/v2/auth/login').send({ email: teacher.email, password: 'reset-cutover-password' }).expect(200);
+      const { AccessTokenService } = await import('../../src/auth/access-token.service');
+      const resetLinks = await Promise.all([0, 1].map(() => app.get(AccessTokenService).createForUser(teacher.id, 'password_reset')));
+      const parallelResets = await Promise.all(resetLinks.map(link => request(server).post('/api/v2/auth/access-token/complete').send({ token: link.preview!.token, password: 'parallel-cutover-password' })));
+      expect(parallelResets.map(result => result.status).sort()).toEqual([200, 409]);
+      await request(server).post('/api/v2/auth/login').send({ email: teacher.email, password: 'parallel-cutover-password' }).expect(200);
       process.env.LEGACY_API_MODE = 'enabled';
       await expect(guard.onModuleInit()).rejects.toThrow('verified restore');
     } finally {

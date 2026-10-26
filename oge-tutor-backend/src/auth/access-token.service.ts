@@ -179,6 +179,8 @@ export class AccessTokenService {
         },
       });
       const type = this.assertTokenUsable(record, new Date(), accountMode);
+      // Match password-change lock order before consuming any token for this account.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id=${record.userId} FOR UPDATE`;
       const marked = await tx.accessToken.updateMany({
         where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
