@@ -21,7 +21,7 @@ export class LearningDeliveryWorker implements OnModuleInit, OnModuleDestroy {
   private running = false;
   constructor(private readonly access: LearningAccessService, private readonly mailer: AuthMailerService, private readonly config: ConfigService) {}
   onModuleInit() {
-    if (this.config.get('NODE_ENV') === 'test' || this.config.get('LEARNING_NOTIFICATIONS_WORKER_ENABLED') === 'false') return;
+    if (process.env.CLI_MODE === 'true' || this.config.get('NODE_ENV') === 'test' || this.config.get('LEARNING_NOTIFICATIONS_WORKER_ENABLED') === 'false') return;
     this.timer = setInterval(() => { void this.runBatch().catch(() => this.logger.error('Notification delivery sweep failed.')); }, 5000);
     this.timer.unref?.();
   }

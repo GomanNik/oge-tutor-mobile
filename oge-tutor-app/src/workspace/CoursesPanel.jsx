@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { legacyIsReadOnly } from './legacyPolicy.js';
 import LessonsPanel from './LessonsPanel.jsx';
 
 const STATUS = { draft: 'Черновик', active: 'Активен', paused: 'Приостановлен', completed: 'Завершён', archived: 'В архиве' };
@@ -225,9 +226,9 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
     <h1>{course.title}</h1>
     <p className="course-subtitle">{course.program.subjectName} · {course.program.examType.toUpperCase()} · {course.program.variant} · {course.program.period}</p>
     <div className="course-facts"><span>{FORMAT[course.defaultFormat]}</span>{context.role !== 'student' && <span>{course.activeEnrollmentCount} / {course.capacity} мест</span>}<span>{course.startsOn} — {course.endsOn || 'Без срока'}</span><span>{course.timezone}</span></div>
-    {course.legacy && <p className="workspace-muted">Исторический курс доступен для чтения. Занятия и работы пока ведутся в прежнем кабинете.</p>}
+    {legacyIsReadOnly(course) && <p className="workspace-muted">Исторический курс доступен для чтения. Занятия и работы пока ведутся в прежнем кабинете.</p>}
     {course.legacy && legacyRole === context.role && <button type="button" onClick={onLegacy}>Открыть учебный кабинет</button>}
-    {admin && !course.legacy && <section className="course-section">
+    {admin && !legacyIsReadOnly(course) && <section className="course-section">
       <div className="course-section-head"><h2>Параметры</h2><div className="course-actions">
         {(['draft', 'paused'].includes(course.status)) && <button type="button" disabled={busy} onClick={() => courseAction('activate')}>Активировать</button>}
         {course.status === 'active' && <button type="button" disabled={busy} onClick={() => courseAction('pause')}>Пауза</button>}
@@ -245,7 +246,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
     <section className="course-section"><div className="course-section-head"><h2>Преподаватели</h2></div>
       <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Имя</th><th>Роль</th><th>Статус</th>{admin && <th>Действия</th>}</tr></thead><tbody>
         {teachers.map(teacher => <tr key={teacher.id}><td data-label="Имя">{teacher.displayName}</td><td data-label="Роль">{TEACHER_ROLE[teacher.role]}</td><td data-label="Статус">{teacher.status === 'active' ? 'Назначен' : 'Завершил'}</td>
-          {admin && <td data-label="Действия">{teacher.status === 'active' && !course.legacy && <>
+          {admin && <td data-label="Действия">{teacher.status === 'active' && !legacyIsReadOnly(course) && <>
             <select aria-label={`Роль ${teacher.displayName}`} value={teacher.role} disabled={busy} onChange={event => perform(() => api.updateCourseTeacher(context, course.id, teacher, { role: event.target.value }))}>
               {Object.entries(TEACHER_ROLE).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select>
@@ -253,7 +254,7 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
           </>}</td>}
         </tr>)}
       </tbody></table></div>
-      {admin && !course.legacy && !['completed', 'archived'].includes(course.status) && <form className="course-inline-form" onSubmit={addTeacher}>
+      {admin && !legacyIsReadOnly(course) && !['completed', 'archived'].includes(course.status) && <form className="course-inline-form" onSubmit={addTeacher}>
         <MemberPicker api={api} context={context} role="teacher" value={teacherId} onChange={setTeacherId} label="Добавить преподавателя" />
         <label>Роль<select value={teacherRole} onChange={event => setTeacherRole(event.target.value)}>{Object.entries(TEACHER_ROLE).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <button type="submit" disabled={busy || !teacherId}>Добавить</button>
@@ -262,17 +263,17 @@ function CourseDetail({ api, context, course, onChanged, onBack, onAccessError, 
     <section className="course-section"><div className="course-section-head"><h2>{context.role === 'student' ? 'Моё участие' : 'Ученики'}</h2></div>
       <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Ученик</th><th>Статус</th><th>Цель</th>{admin && <th>Действия</th>}</tr></thead><tbody>
         {enrollments.map(enrollment => <tr key={enrollment.id}><td data-label="Ученик">{enrollment.displayName}</td><td data-label="Статус">{ENROLLMENT_STATUS[enrollment.status]}</td><td data-label="Цель">{enrollment.goal || '—'}</td>
-          {admin && <td data-label="Действия">{!course.legacy && <button type="button" onClick={() => setEditingEnrollment({ ...enrollment, nextStatus: enrollment.status })}>Изменить</button>}</td>}
+          {admin && <td data-label="Действия">{!legacyIsReadOnly(course) && <button type="button" onClick={() => setEditingEnrollment({ ...enrollment, nextStatus: enrollment.status })}>Изменить</button>}</td>}
         </tr>)}
       </tbody></table></div>
-      {admin && !course.legacy && !['completed', 'archived'].includes(course.status) && <form className="course-inline-form" onSubmit={addEnrollment}>
+      {admin && !legacyIsReadOnly(course) && !['completed', 'archived'].includes(course.status) && <form className="course-inline-form" onSubmit={addEnrollment}>
         <MemberPicker api={api} context={context} role="student" value={studentId} onChange={setStudentId} label="Добавить ученика" />
         <label>Статус<select value={newStatus} onChange={event => setNewStatus(event.target.value)}><option value="active">Зачислить</option><option value="invited">Пригласить</option></select></label>
         <label>Цель<input maxLength="500" value={goal} onChange={event => setGoal(event.target.value)} /></label>
         <label>Заметка для команды<textarea maxLength="1000" value={note} onChange={event => setNote(event.target.value)} /></label>
         <button type="submit" disabled={busy || !studentId}>Добавить</button>
       </form>}
-      {admin && !course.legacy && !['completed', 'archived'].includes(course.status) && <BatchEnroll api={api} context={context} courseId={course.id} disabled={busy} onApplied={() => { onChanged(course); setVersion(value => value + 1); }} onAccessError={onAccessError} />}
+      {admin && !legacyIsReadOnly(course) && !['completed', 'archived'].includes(course.status) && <BatchEnroll api={api} context={context} courseId={course.id} disabled={busy} onApplied={() => { onChanged(course); setVersion(value => value + 1); }} onAccessError={onAccessError} />}
       {editingEnrollment && <form className="course-inline-form course-edit-enrollment" onSubmit={changeEnrollment}>
         <h3>{editingEnrollment.displayName}</h3>
         <label>Статус<select value={editingEnrollment.nextStatus} onChange={event => setEditingEnrollment(current => ({ ...current, nextStatus: event.target.value }))}>

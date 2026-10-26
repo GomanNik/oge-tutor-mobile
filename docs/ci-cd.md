@@ -2,6 +2,8 @@
 
 This repository uses pnpm as the only package manager for the frontend and backend.
 
+Block 7 adds a restored-API database/files drill to AppModule E2E and a second real-browser phase after restarting the disposable backend with v1 disabled. Browser artifacts use separate `real-api` and `cutover` directories; restore JSON is uploaded separately. This tests the release procedure on generated fixtures, not a production backup. See [Block 7 verification](platform/block-7-verification.md) and the [operator runbook](platform/block-7-operations.md).
+
 ## Local Install
 
 From the repository root:

@@ -1,3 +1,5 @@
+import { parseLegacyApiMode } from '../workspace/legacy-mode';
+
 type RawEnv = Record<string, unknown>;
 
 const DEV_JWT_SECRET = 'dev-secret-change-me';
@@ -90,6 +92,10 @@ export function validateEnv(env: RawEnv) {
     throw new Error('WORKSPACE_INVITE_KEY must be at least 32 characters in production.');
   }
   const metricsToken = optionalText(env, 'METRICS_TOKEN');
+  const legacyMode = parseLegacyApiMode(optionalText(env, 'LEGACY_API_MODE'));
+  if (legacyMode === 'disabled' && optionalText(env, 'LEGACY_CUTOVER_CONFIRM') !== 'verified-backup-and-reconciliation') {
+    throw new Error('LEGACY_API_MODE=disabled requires LEGACY_CUTOVER_CONFIRM=verified-backup-and-reconciliation after a restore drill and cutover verification.');
+  }
   if (production && (!metricsToken || metricsToken.length < 32)) {
     throw new Error('METRICS_TOKEN must be at least 32 characters in production.');
   }
@@ -128,5 +134,6 @@ export function validateEnv(env: RawEnv) {
     SMTP_SECURE: smtpSecure,
     WORKSPACE_INVITE_KEY: workspaceInviteKey,
     METRICS_TOKEN: metricsToken,
+    LEGACY_API_MODE: legacyMode,
   };
 }

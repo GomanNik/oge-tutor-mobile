@@ -5,6 +5,7 @@ import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { AssignmentQueryDto, AssignmentRecipientsDto, CreateAssignmentDto, CreateReviewDto, SubmitAssignmentDto, UpdateAssignmentDto, UpdateRecipientDto, WorkPageDto, WorkReasonDto } from './assignments.dto';
 import { checkRevision, fileDto, TaskSnapshot, WorkAccessService, workConflict, WorkTx } from './work-access.service';
 import { LearningEventsService } from '../learning/learning-events.service';
+import { legacyReadOnly } from '../workspace/legacy-mode';
 
 const include = { course: { select: { title: true, workspaceId: true, programVersionId: true, status: true } }, files: { include: { file: true } } } satisfies Prisma.AssignmentInclude;
 type Row = Prisma.AssignmentGetPayload<{ include: typeof include }>;
@@ -12,7 +13,7 @@ const recipientInclude = { enrollment: { include: { membership: { include: { use
 type Recipient = Prisma.AssignmentRecipientGetPayload<{ include: typeof recipientInclude }>;
 const reviewInclude = { files: { include: { file: true } } } satisfies Prisma.AssignmentReviewInclude;
 const submissionInclude = { files: { include: { file: true } }, reviews: { include: reviewInclude, orderBy: { number: 'asc' as const } } } satisfies Prisma.AssignmentSubmissionInclude;
-const header = (row: Row, ctx: WorkspaceContext) => ({ id: row.id, courseId: row.courseId, courseTitle: row.course.title, programVersionId: row.course.programVersionId, title: row.title, instructions: row.instructions, taskDefinitionIds: row.taskDefinitionIds, tasks: row.taskSnapshot, dueAt: row.dueAt, status: row.status, revision: row.revision, publishedAt: row.publishedAt, closedAt: row.closedAt, closeReason: row.closeReason, legacy: Boolean(row.legacyHomeworkId), ...(row.legacyHomeworkId && ctx.role !== 'admin' ? { legacyState: row.legacyState, legacyMaterials: row.legacyMaterials } : {}), files: row.files.map(f => fileDto(f.file)) });
+const header = (row: Row, ctx: WorkspaceContext) => ({ id: row.id, courseId: row.courseId, courseTitle: row.course.title, programVersionId: row.course.programVersionId, title: row.title, instructions: row.instructions, taskDefinitionIds: row.taskDefinitionIds, tasks: row.taskSnapshot, dueAt: row.dueAt, status: row.status, revision: row.revision, publishedAt: row.publishedAt, closedAt: row.closedAt, closeReason: row.closeReason, legacy: Boolean(row.legacyHomeworkId), legacyReadOnly: legacyReadOnly(row.legacyHomeworkId), ...(row.legacyHomeworkId && ctx.role !== 'admin' ? { legacyState: row.legacyState, legacyMaterials: row.legacyMaterials } : {}), files: row.files.map(f => fileDto(f.file)) });
 const recipientDto = (row: Recipient, ctx: WorkspaceContext) => ({ id: row.id, assignmentId: row.assignmentId, enrollmentId: row.enrollmentId, dueAt: row.dueAt, status: row.status, reason: row.reason, revision: row.revision, overdue: ['assigned', 'needs_revision'].includes(row.status) && row.dueAt < new Date(), ...(ctx.role === 'student' ? {} : { displayName: row.enrollment.membership.displayNameOverride || row.enrollment.membership.user.displayName }) });
 const reviewDto = (row: Prisma.AssignmentReviewGetPayload<{ include: typeof reviewInclude }>) => ({ id: row.id, submissionId: row.submissionId, number: row.number, revision: row.revision, status: row.status, decision: row.decision, comment: row.comment, scores: row.scores, reason: row.reason, reviewerUserId: row.reviewerUserId, source: row.source, createdAt: row.createdAt, publishedAt: row.publishedAt, legacyMaterials: row.legacyMaterials, files: row.files.map(f => fileDto(f.file)) });
 const changed = <T>(ctx: WorkspaceContext, item: T) => ({ item, changed: ['assignments'], requestId: ctx.requestId });
@@ -33,7 +34,7 @@ export class AssignmentsService {
   private async editable(tx: WorkTx, ctx: WorkspaceContext, id: string, privateWork = false) {
     const row = await this.visible(tx, ctx, id);
     await this.access.editor(tx, ctx, row.courseId, privateWork);
-    if (row.legacyHomeworkId) throw workConflict('legacy_assignment_read_only', 'Историческая работа редактируется в прежнем кабинете.');
+    if (legacyReadOnly(row.legacyHomeworkId)) throw workConflict('legacy_assignment_read_only', 'Историческая работа редактируется в прежнем кабинете.');
     return row;
   }
 
@@ -157,7 +158,7 @@ export class AssignmentsService {
       const row = await this.recipient(tx, ctx, id, true);
       return this.access.once(tx, ctx, `recipients:${id}:submit`, key, { ...body, revision }, async () => {
         checkRevision(row.revision, revision);
-        if (row.assignment.legacyHomeworkId) throw workConflict('legacy_assignment_read_only', 'Историческая работа сдаётся в прежнем кабинете.');
+        if (legacyReadOnly(row.assignment.legacyHomeworkId)) throw workConflict('legacy_assignment_read_only', 'Историческая работа сдаётся в прежнем кабинете.');
         if (row.assignment.status !== 'published' || row.assignment.course.status !== 'active' || !['assigned', 'needs_revision'].includes(row.status)) throw workConflict('invalid_state', 'Сейчас работу нельзя сдать.');
         await this.access.recipients(tx, row.courseId, [row.enrollmentId]);
         if (!body.text.trim() && !body.fileIds.length) throw validationError('Добавьте текст или файл решения.');
@@ -190,7 +191,7 @@ export class AssignmentsService {
     const submission = await tx.assignmentSubmission.findUnique({ where: { id: submissionId }, include: { reviews: { orderBy: { number: 'desc' } } } });
     if (!submission) throw notFound();
     const recipient = await this.recipient(tx, ctx, submission.recipientId, true);
-    if (recipient.assignment.legacyHomeworkId) throw workConflict('legacy_assignment_read_only', 'Историческая проверка выполняется в прежнем кабинете.');
+    if (legacyReadOnly(recipient.assignment.legacyHomeworkId)) throw workConflict('legacy_assignment_read_only', 'Историческая проверка выполняется в прежнем кабинете.');
     return { submission, recipient };
   }
   async createReview(ctx: WorkspaceContext, submissionId: string, body: CreateReviewDto, revision: number, key: string) {

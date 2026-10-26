@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:migrations": "node scripts/migration-acceptance.mjs",
+    "test:restore": "node scripts/release-restore-drill.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
@@ -19,9 +20,12 @@
     "bootstrap:teacher": "ts-node --project tsconfig.json src/cli/bootstrap-teacher.ts",
     "workspace:operator": "ts-node --project tsconfig.json src/cli/workspace-operator.ts",
     "catalog:operator": "ts-node --project tsconfig.json src/cli/catalog-operator.ts",
-    "learning:operator": "ts-node --project tsconfig.json src/cli/learning-operator.ts"
+    "learning:operator": "ts-node --project tsconfig.json src/cli/learning-operator.ts",
+    "series:operator": "ts-node --project tsconfig.json src/cli/series-operator.ts",
+    "release:operator": "ts-node --project tsconfig.json src/cli/release-operator.ts"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "0.5.1",
     "@nestjs/common": "11.1.27",
     "@nestjs/config": "4.0.4",
     "@nestjs/core": "11.1.27",
@@ -41,11 +45,11 @@
     "passport": "0.7.0",
     "passport-jwt": "4.0.1",
     "reflect-metadata": "0.2.2",
+    "rrule": "2.8.1",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
-    "ajv": "8.18.0",
     "@nestjs/cli": "11.0.23",
     "@nestjs/testing": "11.1.27",
     "@types/bcryptjs": "2.4.6",
@@ -55,6 +59,7 @@
     "@types/nodemailer": "8.0.1",
     "@types/passport-jwt": "4.0.1",
     "@types/supertest": "7.2.0",
+    "ajv": "8.18.0",
     "eslint": "9.39.1",
     "globals": "16.5.0",
     "prettier": "3.4.2",

@@ -7,6 +7,9 @@ import { notFound } from '../common/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 
 const counters = { loginFailures: 0, accessDenials: 0, outboxDeliveryFailures: 0, learningDeliveryFailures: 0 };
+const legacyRequests = { enabled: 0, read_only: 0, disabled: 0 };
+let lastLegacyRequest = 0;
+export function recordLegacyRequest(mode: keyof typeof legacyRequests) { legacyRequests[mode]++; lastLegacyRequest = Math.floor(Date.now() / 1000); }
 
 export function recordHttpFailure(path: string, status: number) {
   if (status === 401 && (path === '/auth/login' || path === '/api/v2/auth/login')) counters.loginFailures += 1;
@@ -35,14 +38,24 @@ export class MetricsController {
   async metrics(@Headers('authorization') authorization?: string) {
     const configured = this.config.get<string>('METRICS_TOKEN');
     if (!configured || !authorization?.startsWith('Bearer ') || !equalToken(authorization.slice(7), configured)) throw notFound();
-    const [queued, failed, learningQueued, learningFailed, oldest] = await Promise.all([
+    const [queued, failed, learningQueued, learningFailed, oldest, seriesDue, seriesFailed] = await Promise.all([
       this.prisma.workspaceEmailOutbox.count({ where: { sentAt: null, canceledAt: null } }),
       this.prisma.workspaceEmailOutbox.count({ where: { sentAt: null, canceledAt: null, invitation: { deliveryStatus: 'failed' } } }),
       this.prisma.learningDelivery.count({ where: { status: { in: ['queued', 'processing'] } } }),
       this.prisma.learningDelivery.count({ where: { status: 'failed' } }),
       this.prisma.learningDelivery.findFirst({ where: { status: { in: ['queued', 'processing'] } }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } }),
+      this.prisma.lessonSeries.count({ where: { status: 'active', nextRunAt: { lte: new Date() } } }),
+      this.prisma.lessonSeries.count({ where: { failures: { gt: 0 } } }),
     ]);
     return [
+      '# TYPE oge_legacy_requests_total counter',
+      ...Object.entries(legacyRequests).map(([mode, count]) => `oge_legacy_requests_total{mode="${mode}"} ${count}`),
+      '# TYPE oge_legacy_last_request_unixtime gauge',
+      `oge_legacy_last_request_unixtime ${lastLegacyRequest}`,
+      '# TYPE oge_lesson_series_due gauge',
+      `oge_lesson_series_due ${seriesDue}`,
+      '# TYPE oge_lesson_series_failed gauge',
+      `oge_lesson_series_failed ${seriesFailed}`,
       '# TYPE oge_login_failures_total counter',
       `oge_login_failures_total ${counters.loginFailures}`,
       '# TYPE oge_access_denials_total counter',

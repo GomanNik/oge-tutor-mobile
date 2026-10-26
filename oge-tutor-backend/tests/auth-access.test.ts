@@ -285,6 +285,7 @@ describe('access token consumption', () => {
 
   it('completes invite token, sets password and activates student', async () => {
     const tx = {
+      $queryRaw: vi.fn(async () => []),
       accessToken: {
         findUnique: vi.fn(async () => tokenRecord()),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -298,6 +299,7 @@ describe('access token consumption', () => {
     await expect(service.complete('raw-token', 'newpass123')).resolves.toEqual({ ok: true });
 
     const passwordHash = tx.user.update.mock.calls[0][0].data.passwordHash;
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.accessToken.updateMany.mock.invocationCallOrder[0]);
     expect(passwordHash).not.toBe('newpass123');
     expect(tx.user.update.mock.calls[0][0].data).toMatchObject({ sessionVersion: { increment: 1 }, sessions: { updateMany: { where: { revokedAt: null }, data: { revokedAt: expect.any(Date) } } } });
     await expect(bcrypt.compare('newpass123', passwordHash)).resolves.toBe(true);
@@ -342,6 +344,7 @@ describe('access token consumption', () => {
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
       user: { update: vi.fn(async ({ data }) => ({ id: 'u-teacher', ...data })) },
+      $queryRaw: vi.fn(async () => []),
       studentProfile: { update: vi.fn() },
     };
     const prisma = {

@@ -5,6 +5,8 @@ import { WorkspaceRole } from '@prisma/client';
 import { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { AccessTokenService } from '../auth/access-token.service';
+import { AccessTokenCompleteDto, AccessTokenVerifyDto, ChangeAccountPasswordDto, PasswordResetDto } from '../auth/auth.dto';
 import { Public } from '../auth/public.decorator';
 import { CurrentUser, AuthUser } from '../common/current-user';
 import { AppError, notFound } from '../common/app-error';
@@ -36,16 +38,32 @@ const listResponse = { schema: { type: 'object', additionalProperties: false, pr
 @Controller('api/v2')
 @UseGuards(ThrottlerGuard)
 export class WorkspaceAccountController {
-  constructor(private readonly auth: AuthService, private readonly prisma: PrismaService, private readonly contexts: WorkspaceContextService) {}
+  constructor(private readonly auth: AuthService, private readonly prisma: PrismaService, private readonly contexts: WorkspaceContextService, private readonly accessTokens: AccessTokenService) {}
 
   @Public() @Post('auth/login') @HttpCode(200)
   @Throttle({ target: { limit: 8, ttl: minutes(15) } })
   @ApiOkResponse({ schema: { type: 'object', properties: { session: { type: 'object' }, user: { type: 'object' }, contexts: { type: 'array', items: { type: 'object' } } } } })
   async login(@Body() body: V2LoginDto) {
     const account = await this.auth.validateAccountCredentials(body.email, body.password);
-    const session = await this.auth.signAccountSession(account.id);
+    const session = await this.auth.signAccountSession(account.id, account.passwordHash);
     return { session, user: { id: account.id, email: account.email, displayName: account.displayName, revision: account.revision, catalogManage: Boolean(await this.prisma.catalogGrant.findUnique({ where: { userId: account.id } })) }, contexts: await this.contexts.listMyContexts(account.id) };
   }
+
+  @Public() @Post('auth/password-reset') @HttpCode(200)
+  @Throttle({ ip: { limit: 10, ttl: minutes(1) }, target: { limit: 3, ttl: minutes(15) } })
+  async passwordReset(@Body() body: PasswordResetDto) { return this.auth.requestPasswordReset(body.email, true); }
+
+  @Public() @Post('auth/access-token/verify') @HttpCode(200)
+  @Throttle({ target: { limit: 10, ttl: minutes(15) } })
+  async verifyToken(@Body() body: AccessTokenVerifyDto) { return this.accessTokens.verify(body.token, true); }
+
+  @Public() @Post('auth/access-token/complete') @HttpCode(200)
+  @Throttle({ ip: { limit: 20, ttl: minutes(1) }, target: { limit: 5, ttl: minutes(15) } })
+  async completeToken(@Body() body: AccessTokenCompleteDto) { return this.accessTokens.complete(body.token, body.password, true); }
+
+  @ApiBearerAuth() @Post('me/password') @HttpCode(200)
+  @Throttle({ target: { limit: 5, ttl: minutes(15) } })
+  async password(@CurrentUser() user: AuthUser, @Body() body: ChangeAccountPasswordDto) { return this.auth.changeAccountPassword(user.id, body.currentPassword, body.newPassword); }
 
   @ApiBearerAuth() @Post('auth/logout') @HttpCode(204)
   @ApiNoContentResponse({ description: 'Current session revoked.' })

@@ -2726,7 +2726,8 @@ button:disabled,
   .lesson-attendance-row select, .lesson-attendance-row button { grid-column: 1 / -1; }
 }
 .learning-panel { min-width: 0; }
-.learning-panel .course-actions button, .learning-panel .workspace-toolbar > button, .learning-event > button {
+.learning-panel .course-actions button, .learning-panel .workspace-toolbar > button, .learning-event > button,
+.series-panel .course-actions button, .series-panel .workspace-toolbar > button, .series-panel > button {
   border: 1px solid #a8c4c1; background: #fff; color: #0c5f5a; padding: 8px 12px; font-weight: 700; min-height: 38px;
 }
 .learning-panel .workspace-toolbar label:first-child { flex: 0 1 420px; }
@@ -2746,3 +2747,15 @@ button:disabled,
   .learning-assessment { padding-left: 12px; }
   .learning-event .course-section-head { align-items: flex-start; flex-direction: column; gap: 6px; }
 }
+.series-panel, .series-form, .series-fields { min-width: 0; }
+.series-form { padding-block: 16px; border-block: 1px solid #d6e2de; display: grid; gap: 14px; }
+.series-fields { border: 0; margin: 0; padding: 0; display: grid; gap: 14px; }
+.series-weekdays { display: flex; flex-wrap: wrap; gap: 16px; border: 0; margin: 0; padding: 0; }
+.series-weekdays label { display: flex; align-items: center; gap: 6px; }
+.series-weekdays input { width: 16px; height: 16px; }
+.series-preview { border-left: 3px solid #208365; padding-left: 14px; min-width: 0; }
+.series-preview-list { max-height: 260px; overflow: auto; }
+.series-preview-list > div { display: flex; flex-wrap: wrap; gap: 12px; padding-block: 5px; }
+.series-item { padding-block: 18px; border-bottom: 1px solid #d6e2de; min-width: 0; }
+.series-item h3 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.series-item p, .series-preview p { overflow-wrap: anywhere; }

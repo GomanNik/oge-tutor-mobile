@@ -10,6 +10,6 @@ import { LearningController, MyLearningNotificationsController } from './learnin
 
 @Module({ imports: [WorkspaceModule, AuthModule], controllers: [LearningController, MyLearningNotificationsController],
   providers: [LearningAccessService, LearningEventsService, LearningProgressService, LearningNotificationsService, LearningDeliveryWorker],
-  exports: [LearningEventsService, LearningProgressService, LearningDeliveryWorker],
+  exports: [LearningAccessService, LearningEventsService, LearningProgressService, LearningDeliveryWorker],
 })
 export class LearningModule {}

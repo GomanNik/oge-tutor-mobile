@@ -3,6 +3,7 @@ import { WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/current-user';
 import { AppError, forbidden, notFound } from '../common/app-error';
+import { legacyApiMode } from './legacy-mode';
 
 export type WorkspaceContext = { userId: string; sessionId: string; workspaceId: string; role: WorkspaceRole; requestId: string };
 
@@ -20,7 +21,7 @@ export class WorkspaceContextService {
       workspaceId: row.workspaceId,
       name: row.workspace.name,
       status: row.workspace.status,
-      legacyRole: row.user.role === 'teacher' && row.user.teacherProfile && row.workspace.legacyMapping?.teacherProfileId === row.user.teacherProfile.id
+      legacyRole: legacyApiMode() !== 'enabled' ? null : row.user.role === 'teacher' && row.user.teacherProfile && row.workspace.legacyMapping?.teacherProfileId === row.user.teacherProfile.id
         ? 'teacher'
         : row.user.role === 'student' && row.user.studentProfile?.access === 'active' && row.workspace.legacyMapping?.teacherProfileId === row.user.studentProfile.teacherId
           ? 'student'

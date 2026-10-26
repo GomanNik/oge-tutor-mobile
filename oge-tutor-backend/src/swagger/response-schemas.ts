@@ -27,6 +27,11 @@ export function detailSchema(item: Schema): SchemaObject {
 
 // Schemas reflect BootstrapService's public mappers, including empty-string dates.
 export const responseSchemas: Record<string, SchemaObject> = {
+  V2ReleaseStatusDetail: object({ item: object({ workspaceId: string, asOf: date, legacyApiMode: { type: 'string', enum: ['enabled', 'read_only', 'disabled'] },
+    cutoverCommittedAt: { ...date, nullable: true }, dataConsistent: boolean, readyForCutover: boolean,
+    counts: object({ courses: integer, lessons: integer, assignments: integer, submissions: integer, progressEvents: integer, notifications: integer, files: integer }),
+    checks: array(object({ code: string, count: integer, passed: boolean })), requiresFileVerification: boolean, requiresVerifiedRestore: boolean }) }),
+  V2Runtime: object({ apiVersion: { type: 'integer', enum: [2] }, legacyApiMode: { type: 'string', enum: ['enabled', 'read_only', 'disabled'] }, legacyDataRetained: { type: 'boolean', enum: [true] } }),
   ApiError: object({
     code: { type: 'string', example: 'validation_error' },
     message: string,
@@ -37,7 +42,7 @@ export const responseSchemas: Record<string, SchemaObject> = {
   OkResponse: object({ ok: { ...boolean, enum: [true] } }),
   Session: object({ id: string, userId: string, role: enumeration(C.ROLE), email: { ...string, format: 'email' }, token: { ...string, description: 'JWT on login; empty string on bootstrap.' } }),
   AccessTokenPreview: object({ token: string, link: string, expiresAt: date }),
-  AccessTokenVerified: object({ valid: { ...boolean, enum: [true] }, type: enumeration(C.ACCESS_TOKEN_TYPE), expiresAt: date, account: object({ email: { ...string, description: 'Masked email address.' }, name: string, role: enumeration(C.ROLE) }) }),
+  AccessTokenVerified: object({ valid: { ...boolean, enum: [true] }, type: enumeration(C.ACCESS_TOKEN_TYPE), expiresAt: date, account: object({ email: { ...string, description: 'Masked email address.' }, name: string, role: enumeration(C.ROLE) }, ['email', 'name']) }),
   PasswordResetResponse: object({ ok: { ...boolean, enum: [true] }, reset: ref('AccessTokenPreview') }, ['ok']),
   LogoutResponse: object({ session: { type: 'object', nullable: true, enum: [null] } }),
   FileResource: object({ id: string, originalName: string, mimeType: string, size: { ...integer, minimum: 0 }, url: string, uploadedAt: date }),
@@ -146,6 +151,8 @@ Object.assign(responseSchemas, {
     enrollmentIds: array(string), recipientId: string, attempt: integer, submissionId: string,
     number: integer, decision: enumeration(AssignmentReviewDecision), mimeType: string, size: integer,
     dueAt: date,
+    seriesId: string, seriesRevision: integer, seriesOccurrenceKey: string, seriesException: boolean,
+    createdCount: integer, canceledCount: integer, generation: integer, manifestSha256: string,
     visibility: enumeration(LearningVisibility), supersedesId: { ...string, nullable: true },
   }, []),
   V2AuditEvent: strictObject({ id: string, actorUserId: { ...string, nullable: true }, action: string, targetType: string, targetId: string, reason: { ...string, nullable: true }, changes: ref('V2AuditChanges'), requestId: string, occurredAt: date }),
@@ -196,7 +203,7 @@ Object.assign(responseSchemas, {
     title: string, defaultFormat: enumeration(CourseFormat), capacity: integer,
     startsOn: { type: 'string', format: 'date' }, endsOn: { type: 'string', format: 'date', nullable: true },
     timezone: string, status: enumeration(CourseStatus), revision: integer,
-    activeEnrollmentCount: { ...integer, nullable: true }, legacy: boolean, ...timestamps,
+    activeEnrollmentCount: { ...integer, nullable: true }, legacy: boolean, legacyReadOnly: boolean, ...timestamps,
   }),
   V2CourseTeacher: strictObject({
     id: string, teacherUserId: string, displayName: string, role: enumeration(CourseTeacherRole),
@@ -230,7 +237,8 @@ Object.assign(responseSchemas, {
   V2Lesson: strictObject({
     id: string, courseId: string, courseTitle: string, topic: string, startAt: date, endAt: date,
     timezone: string, format: enumeration(CourseFormat), status: enumeration(LessonStatus), revision: integer,
-    completedAt: { ...date, nullable: true }, legacy: boolean, note: string, completionComment: string,
+    completedAt: { ...date, nullable: true }, legacy: boolean, legacyReadOnly: boolean, note: string, completionComment: string,
+    seriesId: { ...string, nullable: true }, seriesRevision: { ...integer, nullable: true }, seriesOccurrenceKey: { ...string, nullable: true }, seriesException: boolean,
     teachers: array(ref('V2LessonTeacher')), participants: array(ref('V2LessonParticipant')),
   }, ['id', 'courseId', 'courseTitle', 'topic', 'startAt', 'endAt', 'timezone', 'format', 'status', 'revision', 'completedAt', 'legacy', 'teachers', 'participants']),
   V2LessonConflict: strictObject({ userId: string, kind: { type: 'string', enum: ['teacher', 'student'] } }),
@@ -238,6 +246,25 @@ Object.assign(responseSchemas, {
   V2LessonPage: pageSchema(ref('V2Lesson')),
   V2LessonDetail: detailSchema(ref('V2Lesson')),
   V2LessonMutation: v2Mutation(ref('V2Lesson')),
+});
+
+Object.assign(responseSchemas, {
+  V2LessonSeries: strictObject({
+    id: string, courseId: string, topic: string, note: string, format: enumeration(CourseFormat),
+    startsAtLocal: string, untilLocalDate: string, timezone: string, frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
+    interval: integer, weekdays: array(integer), monthDays: array(integer), excludedDates: array(string), durationMinutes: integer, materializeDays: integer,
+    dstDisambiguation: { type: 'string', enum: ['reject', 'earlier', 'later'] }, teacherLinkIds: array(string), participantEnrollmentIds: array(string),
+    status: { type: 'string', enum: ['active', 'paused', 'canceled', 'completed'] }, revision: integer, generation: integer, materializedThrough: { ...date, nullable: true },
+    failures: integer, lastErrorCode: string, nextRunAt: date, ...timestamps,
+  }),
+  V2SeriesOccurrence: strictObject({ key: string, localStart: string, startAt: date, endAt: date }),
+  V2SeriesIssue: strictObject({ occurrenceKey: string, code: string, conflicts: array(ref('V2LessonConflict')) }, ['occurrenceKey', 'code']),
+  V2LessonSeriesPreview: strictObject({ operation: string, canApply: boolean, occurrences: array(ref('V2SeriesOccurrence')),
+    cancelLessons: array(strictObject({ id: string, revision: integer, startAt: date })), preservedCount: integer, issues: array(ref('V2SeriesIssue')),
+    through: date, previewToken: string, expiresAt: date }),
+  V2LessonSeriesPage: pageSchema(ref('V2LessonSeries')),
+  V2LessonSeriesDetail: detailSchema(ref('V2LessonSeries')),
+  V2LessonSeriesMutation: strictObject({ item: ref('V2LessonSeries'), createdCount: integer, canceledCount: integer, changed: array(string), requestId: string }),
 });
 
 const nullableDate = { ...date, nullable: true };
@@ -248,7 +275,7 @@ const assignmentProperties = {
   id: string, courseId: string, courseTitle: string, programVersionId: string,
   title: string, instructions: string, taskDefinitionIds: array(string), tasks: array(ref('V2AssignmentTask')),
   dueAt: date, status: enumeration(AssignmentStatus), revision: integer,
-  publishedAt: nullableDate, closedAt: nullableDate, closeReason: string, legacy: boolean,
+  publishedAt: nullableDate, closedAt: nullableDate, closeReason: string, legacy: boolean, legacyReadOnly: boolean,
   legacyState: historical, legacyMaterials: historicalArray, files: array(ref('V2WorkFile')),
 };
 const assignmentRequired = Object.keys(assignmentProperties).filter(key => !key.startsWith('legacy'));
@@ -270,14 +297,14 @@ Object.assign(responseSchemas, {
     reviews: array(ref('V2AssignmentReview')) }),
   V2LearningMaterial: strictObject({ id: string, programVersionId: string, programName: string, subjectName: string,
     taskDefinitionIds: array(string), title: string, description: string, url: string,
-    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyState: historical,
+    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyReadOnly: boolean, legacyState: historical,
     revision: integer, archivedAt: nullableDate, createdAt: date },
   ['id', 'programVersionId', 'programName', 'subjectName', 'taskDefinitionIds', 'title', 'description', 'url', 'file', 'legacy', 'revision', 'archivedAt', 'createdAt']),
   V2MaterialPublication: strictObject({ id: string, courseId: string, lessonId: { ...string, nullable: true }, revision: integer,
     publishedAt: date, revokedAt: nullableDate, recipientEnrollmentIds: array(string) }),
   V2MaterialDetailItem: strictObject({ id: string, programVersionId: string, programName: string, subjectName: string,
     taskDefinitionIds: array(string), title: string, description: string, url: string,
-    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyState: historical,
+    file: { allOf: [ref('V2WorkFile')], nullable: true }, legacy: boolean, legacyReadOnly: boolean, legacyState: historical,
     revision: integer, archivedAt: nullableDate, createdAt: date, canEdit: boolean, canArchive: boolean,
     publications: array(ref('V2MaterialPublication')) },
   ['id', 'programVersionId', 'programName', 'subjectName', 'taskDefinitionIds', 'title', 'description', 'url', 'file', 'legacy', 'revision', 'archivedAt', 'createdAt', 'canEdit', 'canArchive', 'publications']),

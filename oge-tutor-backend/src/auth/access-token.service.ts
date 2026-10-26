@@ -8,6 +8,7 @@ import { ACCESS_STATUS, ACCESS_TOKEN_TYPE, AccessTokenType, ROLE } from '../comm
 import { cleanText, validatePassword } from '../common/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { isProduction } from './auth-config';
+import { legacyApiMode } from '../workspace/legacy-mode';
 
 export type AccessTokenPreview = {
   token?: string;
@@ -108,7 +109,7 @@ export class AccessTokenService {
   }
 
   private profileName(user: any): string {
-    return cleanText(user?.studentProfile?.name || user?.teacherProfile?.name);
+    return cleanText(user?.studentProfile?.name || user?.teacherProfile?.name || user?.displayName);
   }
 
   private assertKnownType(type: string): AccessTokenType {
@@ -116,14 +117,15 @@ export class AccessTokenService {
     throw validationError('Ссылка недействительна.', { token: 'invalid' });
   }
 
-  private assertTokenUsable(record: any, now = new Date()) {
+  private assertTokenUsable(record: any, now = new Date(), accountMode = false) {
     if (!record?.user) throw validationError('Ссылка недействительна.', { token: 'invalid' });
     const type = this.assertKnownType(record.type);
     if (record.usedAt) throw conflict('Ссылка уже использована.', { token: 'used' });
     if (new Date(record.expiresAt).getTime() <= now.getTime()) throw conflict('Срок действия ссылки истёк.', { token: 'expired' });
-    if (record.user.role === ROLE.STUDENT && record.user.studentProfile?.access === ACCESS_STATUS.DISABLED) {
+    if (record.user.role === ROLE.STUDENT && record.user.studentProfile?.access === ACCESS_STATUS.DISABLED && !(accountMode && type === ACCESS_TOKEN_TYPE.PASSWORD_RESET)) {
       throw forbidden('Доступ ученика отключён.');
     }
+    if (accountMode && type === ACCESS_TOKEN_TYPE.INVITE && legacyApiMode() === 'disabled') throw forbidden('Старое приглашение закрыто. Запросите приглашение в рабочее пространство у администратора.');
     if (type === ACCESS_TOKEN_TYPE.INVITE && (record.user.role !== ROLE.STUDENT || !record.user.studentProfile)) {
       throw validationError('Ссылка недействительна.', { token: 'invalid' });
     }
@@ -145,9 +147,9 @@ export class AccessTokenService {
     });
   }
 
-  async verify(rawToken: unknown): Promise<VerifiedAccessToken> {
+  async verify(rawToken: unknown, accountMode = false): Promise<VerifiedAccessToken> {
     const record = await this.findByRawToken(rawToken);
-    const type = this.assertTokenUsable(record);
+    const type = this.assertTokenUsable(record, new Date(), accountMode);
     return {
       valid: true,
       type,
@@ -159,9 +161,10 @@ export class AccessTokenService {
     };
   }
 
-  async complete(rawToken: unknown, passwordInput: unknown) {
+  async complete(rawToken: unknown, passwordInput: unknown, accountMode = false) {
     const token = this.normalizeToken(rawToken);
     const password = validatePassword(passwordInput);
+    if (accountMode && Buffer.byteLength(password, 'utf8') > 72) throw validationError('Новый пароль должен занимать не более 72 байт UTF-8.');
     const tokenHash = AccessTokenService.hashToken(token);
     await this.prisma.$transaction(async (tx) => {
       const record: any = await tx.accessToken.findUnique({
@@ -175,7 +178,9 @@ export class AccessTokenService {
           },
         },
       });
-      const type = this.assertTokenUsable(record);
+      const type = this.assertTokenUsable(record, new Date(), accountMode);
+      // Match password-change lock order before consuming any token for this account.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id=${record.userId} FOR UPDATE`;
       const marked = await tx.accessToken.updateMany({
         where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
@@ -186,8 +191,9 @@ export class AccessTokenService {
         where: { id: record.userId },
         data: { passwordHash: await bcrypt.hash(password, 12), ...revokeAllSessions() },
       });
+      if (accountMode) await tx.accessToken.updateMany({ where: { userId: record.userId, usedAt: null }, data: { usedAt: new Date() } });
 
-      if (record.user.role === ROLE.STUDENT && record.user.studentProfile) {
+      if ((!accountMode || type === ACCESS_TOKEN_TYPE.INVITE) && record.user.role === ROLE.STUDENT && record.user.studentProfile) {
         const shouldActivate = type === ACCESS_TOKEN_TYPE.INVITE
           || record.user.studentProfile.access === ACCESS_STATUS.PASSWORD_PENDING;
         if (shouldActivate) {

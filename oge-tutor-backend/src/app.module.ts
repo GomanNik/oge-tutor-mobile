@@ -25,6 +25,8 @@ import { CoursesModule } from './courses/courses.module';
 import { CourseLessonsModule } from './course-lessons/course-lessons.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { LearningModule } from './learning/learning.module';
+import { LegacyRetirementGuard, RuntimeController } from './workspace/legacy-retirement.guard';
+import { ReleaseModule } from './release/release.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { RequestLoggerMiddleware } from './common/request-logger.middleware';
 import { OperationLoggerInterceptor } from './common/operation-logger.interceptor';
@@ -60,15 +62,18 @@ import { authTargetTracker, AUTH_THROTTLE_TTL_MS } from './auth/auth-throttle';
     CourseLessonsModule,
     AssignmentsModule,
     LearningModule,
+    ReleaseModule,
     ObservabilityModule,
   ],
   providers: [
     JwtStrategy,
+    { provide: APP_GUARD, useClass: LegacyRetirementGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: LegacyAccessGuard },
     { provide: APP_GUARD, useClass: RoleGuard },
     { provide: APP_INTERCEPTOR, useClass: OperationLoggerInterceptor },
   ],
+  controllers: [RuntimeController],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

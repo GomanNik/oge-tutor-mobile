@@ -17,15 +17,17 @@ import * as Courses from '../courses/courses.dto';
 import * as CourseLessons from '../course-lessons/course-lessons.dto';
 import * as Assignments from '../assignments/assignments.dto';
 import * as Learning from '../learning/learning.dto';
+import * as LessonSeries from '../course-lessons/lesson-series.dto';
+import { isLegacyRoute } from '../workspace/legacy-mode';
 import { collectionSchemas, object, ref, responseSchemas } from './response-schemas';
 
 const requestModels = [
   ...Object.values(Auth), ...Object.values(Attachments), ...Object.values(Settings),
   ...Object.values(Files), ...Object.values(Homeworks), ...Object.values(Lessons),
   ...Object.values(Materials), ...Object.values(Progress), ...Object.values(Students), ...Object.values(Teacher),
-  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons), ...Object.values(Assignments), ...Object.values(Learning),
+  ...Object.values(Workspace), ...Object.values(ProgramCatalog), ...Object.values(Courses), ...Object.values(CourseLessons), ...Object.values(Assignments), ...Object.values(Learning), ...Object.values(LessonSeries),
 ];
-const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new']);
+const publicPaths = new Set(['/health', '/health/ready', '/auth/login', '/auth/password-reset', '/auth/access-token/verify', '/auth/access-token/complete', '/api/v2/auth/login', '/api/v2/invitations/accept-new', '/api/v2/runtime', '/api/v2/auth/password-reset', '/api/v2/auth/access-token/verify', '/api/v2/auth/access-token/complete']);
 const methods = ['get', 'post', 'patch', 'put', 'delete'] as const;
 
 export interface OperationContract {
@@ -38,6 +40,20 @@ export interface OperationContract {
 export type OperationContracts = Record<string, OperationContract>;
 
 const contracts: OperationContracts = {
+  'get /api/v2/workspaces/{}/release-status': { response: 'V2ReleaseStatusDetail' },
+  'get /api/v2/runtime': { response: 'V2Runtime' },
+  'post /api/v2/auth/password-reset': { request: 'PasswordResetDto', response: 'PasswordResetResponse' },
+  'post /api/v2/auth/access-token/verify': { request: 'AccessTokenVerifyDto', response: 'AccessTokenVerified' },
+  'post /api/v2/auth/access-token/complete': { request: 'AccessTokenCompleteDto', response: 'OkResponse' },
+  'post /api/v2/me/password': { request: 'ChangeAccountPasswordDto', response: 'OkResponse' },
+  'get /api/v2/workspaces/{}/lesson-series': { response: 'V2LessonSeriesPage' },
+  'get /api/v2/workspaces/{}/lesson-series/{}': { response: 'V2LessonSeriesDetail' },
+  'post /api/v2/workspaces/{}/lesson-series/preview': { request: 'SeriesPreviewDto', response: 'V2LessonSeriesPreview' },
+  'post /api/v2/workspaces/{}/lesson-series': { request: 'SaveSeriesDto', response: 'V2LessonSeriesMutation' },
+  'post /api/v2/workspaces/{}/lesson-series/{}/preview': { request: 'SeriesPreviewDto', response: 'V2LessonSeriesPreview' },
+  'patch /api/v2/workspaces/{}/lesson-series/{}': { request: 'SaveSeriesDto', response: 'V2LessonSeriesMutation' },
+  'post /api/v2/workspaces/{}/lesson-series/{}/actions/preview': { request: 'SeriesActionPreviewDto', response: 'V2LessonSeriesPreview' },
+  'post /api/v2/workspaces/{}/lesson-series/{}/actions': { request: 'SeriesActionDto', response: 'V2LessonSeriesMutation' },
   'get /health': { response: 'HealthResponse' },
   'get /health/ready': { response: 'ReadyResponse' },
   'get /bootstrap': { response: 'BootstrapResponse' },
@@ -289,6 +305,7 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
         operation.responses['200'] = { description: 'Authorized file download; Content-Type is the stored MIME type.', headers: { 'Content-Disposition': { schema: { type: 'string' } } }, content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } };
       }
       const errors: Record<string, string> = { '400': 'DTO or request validation failed.', '422': 'Domain validation failed.', '429': 'Rate limit exceeded.', '500': 'Unexpected server error.' };
+      if (isLegacyRoute(path)) { operation.deprecated = true; errors['410'] = 'Legacy API retired; use /api/v2.'; errors['403'] = 'Legacy API is read-only or access is denied.'; }
       if (!isPublic) Object.assign(errors, { '401': 'Missing, expired, or revoked session.', '403': 'Insufficient access.', '404': 'Resource not found.' });
       if (path === '/auth/login' || path === '/api/v2/auth/login') errors['401'] = 'Invalid credentials or unavailable account.';
       if (method !== 'get') errors['409'] = 'State, uniqueness, or concurrency conflict.';
@@ -296,7 +313,8 @@ export function augmentApiDocument(document: OpenAPIObject, overrides: Operation
         errors['412'] = 'Revision mismatch.';
         errors['428'] = 'If-Match header is required.';
       }
-      if (path.startsWith('/auth/access-token/')) errors['403'] = 'Account access disabled.';
+      if (path.startsWith('/auth/access-token/') || path.startsWith('/api/v2/auth/access-token/')) errors['403'] = 'Account access disabled or legacy invitation retired.';
+      if (/\/lesson-series\/\{[^}]+\}\/(?:preview|actions(?:\/preview)?)$/.test(path)) { errors['412'] = 'Revision mismatch.'; errors['428'] = 'If-Match header is required.'; }
       if (contract?.multipart) errors['413'] = 'Upload exceeds configured size limit.';
       if (path === '/health/ready') errors['503'] = 'Service not ready.';
       for (const [status, description] of Object.entries(errors)) {
