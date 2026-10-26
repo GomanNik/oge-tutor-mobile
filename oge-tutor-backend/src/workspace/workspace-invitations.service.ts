@@ -139,13 +139,20 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
       return { result, outboxId: outbox.id };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     let applied;
-    try { applied = await run(); }
-    catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2002' || error.code === 'P2034')) {
-        const previous = await this.prisma.idempotencyRecord.findUnique({ where: { actorUserId_route_key: { actorUserId: ctx.userId, route, key: idempotencyKey } } });
-        if (previous?.bodyHash === digest) return previous.response;
+    for (let attempt = 0; ; attempt++) {
+      try { applied = await run(); break; }
+      catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+          if (attempt >= 2) fail('concurrent_update', 'Данные изменились параллельно. Повторите запрос.');
+          await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
+          continue;
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          const previous = await this.prisma.idempotencyRecord.findUnique({ where: { actorUserId_route_key: { actorUserId: ctx.userId, route, key: idempotencyKey } } });
+          if (previous?.bodyHash === digest) return previous.response;
+        }
+        throw error;
       }
-      throw error;
     }
     if (applied.outboxId) await this.deliverOne(applied.outboxId, true);
     return applied.result;
