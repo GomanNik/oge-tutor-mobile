@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { legacyIsReadOnly } from './legacyPolicy.js';
+import SeriesPanel from './SeriesPanel.jsx';
 
 const STATUS = { planned: 'Запланировано', rescheduled: 'Перенесено', completed: 'Проведено', canceled: 'Отменено' };
 const ATTENDANCE = { unknown: 'Не отмечено', present: 'Присутствовал', absent: 'Отсутствовал', excused: 'Уважительная причина' };
@@ -28,6 +30,7 @@ function LessonForm({ api, context, course, lesson, teachers, enrollments, onSav
   const [teacherLinkIds, setTeacherLinkIds] = useState(lesson ? lesson.teachers.map(item => item.courseTeacherId) : teachers.filter(item => item.status === 'active' && item.role === 'lead').map(item => item.id));
   const [participantEnrollmentIds, setParticipantEnrollmentIds] = useState(lesson ? lesson.participants.map(item => item.enrollmentId) : []);
   const [note, setNote] = useState(lesson?.note || '');
+  const [reason, setReason] = useState('');
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -39,6 +42,7 @@ function LessonForm({ api, context, course, lesson, teachers, enrollments, onSav
     return {
       courseId: course.id, topic: topic.trim(), startAt: toIso(startAt), endAt: toIso(endAt),
       timezone: zone, format, teacherLinkIds, participantEnrollmentIds, note: note.trim(),
+      ...(lesson?.seriesId ? { reason: reason.trim() } : {}),
     };
   }
   async function check() {
@@ -71,6 +75,7 @@ function LessonForm({ api, context, course, lesson, teachers, enrollments, onSav
     <div className="course-section-head"><h4>Ученики</h4><button type="button" onClick={() => { setParticipantEnrollmentIds(eligibleStudents.map(item => item.id)); setPreview(null); }}>Выбрать всех</button></div>
     {choice(eligibleStudents, participantEnrollmentIds, changed(setParticipantEnrollmentIds), 'Участники занятия', 'status')}
     <label>Заметка для команды<textarea maxLength="1000" value={note} onChange={event => changed(setNote)(event.target.value)} /></label>
+    {lesson?.seriesId && <label>Причина исключения<input required minLength="5" maxLength="500" value={reason} onChange={event => changed(setReason)(event.target.value)} /></label>}
     {preview && <div className="course-batch-preview" role="status"><strong>{preview.canCreate ? 'Время свободно' : 'Есть пересечения'}</strong>
       {preview.conflicts.map(item => <p key={`${item.kind}:${item.userId}`}>{item.kind === 'teacher' ? 'Преподаватель' : 'Ученик'}: {item.userId}</p>)}
     </div>}
@@ -92,7 +97,7 @@ function LessonRow({ api, context, lesson, onChanged, onAccessError }) {
   const [canceling, setCanceling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const canManage = context.role !== 'student' && !lesson.legacy;
+  const canManage = context.role !== 'student' && !legacyIsReadOnly(lesson);
   async function action(operation) {
     setBusy(true); setError('');
     try { await operation(); setEditing(false); setCorrection(null); setCanceling(false); onChanged(); }
@@ -149,6 +154,7 @@ function LessonRow({ api, context, lesson, onChanged, onAccessError }) {
 }
 
 export default function LessonsPanel({ api, context, course = null, onAccessError, openLessonId = '' }) {
+  const [view, setView] = useState('calendar');
   const [from, setFrom] = useState(() => day(Date.now() - 7 * 86400000));
   const [to, setTo] = useState(() => day(Date.now() + 60 * 86400000));
   const [rows, setRows] = useState([]);
@@ -188,8 +194,10 @@ export default function LessonsPanel({ api, context, course = null, onAccessErro
   }
   const invalidRange = !from || !to || to <= from || (new Date(to).getTime() - new Date(from).getTime()) > 89 * 86400000;
   return <section className={course ? 'course-section lesson-panel' : 'workspace-content lesson-panel'}>
+    {context.role !== 'student' && <div className="workspace-tabs" role="tablist" aria-label="Расписание и серии"><button type="button" role="tab" aria-selected={view === 'calendar'} onClick={() => setView('calendar')}>Календарь</button><button type="button" role="tab" aria-selected={view === 'series'} onClick={() => setView('series')}>Серии</button></div>}
+    {view === 'series' ? <SeriesPanel api={api} context={context} course={course} onAccessError={onAccessError} onChanged={refresh} /> : <>
     <div className="course-section-head"><h2>{course ? 'Занятия' : 'Расписание'}</h2>
-      {course && !course.legacy && course.status === 'active' && context.role !== 'student' && <button type="button" onClick={beginCreate}>Запланировать</button>}
+      {course && !legacyIsReadOnly(course) && course.status === 'active' && context.role !== 'student' && <button type="button" onClick={beginCreate}>Запланировать</button>}
     </div>
     <div className="course-inline-form"><label>С<input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
       <label>По<input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>
@@ -201,5 +209,6 @@ export default function LessonsPanel({ api, context, course = null, onAccessErro
     {openedLesson && <div className="lesson-list"><LessonRow key={openedLesson.id} api={api} context={context} lesson={openedLesson} onChanged={refresh} onAccessError={onAccessError} /></div>}
     <div className="lesson-list">{rows.filter(lesson => lesson.id !== openedLesson?.id).map(lesson => <LessonRow key={lesson.id} api={api} context={context} lesson={lesson} onChanged={refresh} onAccessError={onAccessError} />)}</div>
     {rows.length < total && <button type="button" className="workspace-more" disabled={loading} onClick={() => setPage(value => value + 1)}>Показать ещё</button>}
+    </>}
   </section>;
 }

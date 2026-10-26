@@ -38,6 +38,7 @@ export class WorkspaceInvitationsService implements OnModuleInit, OnModuleDestro
   ) {}
 
   onModuleInit() {
+    if (process.env.CLI_MODE === 'true' || this.config.get('NODE_ENV') === 'test' || this.config.get('WORKSPACE_INVITATIONS_WORKER_ENABLED') === 'false') return;
     this.timer = setInterval(() => { void this.flushPending().catch(() => { /* The next sweep retries after a transient database failure. */ }); }, 15000);
     this.timer.unref?.();
   }

@@ -15,13 +15,13 @@ export async function lessonConflicts(
   endAt: Date,
   teacherUserIds: string[],
   studentUserIds: string[],
-  excludeLessonId?: string,
+  excludeLessonId?: string | string[],
 ) {
   const allUsers = [...new Set([...teacherUserIds, ...studentUserIds])];
   if (!allUsers.length) return [];
   const rows = await tx.lesson.findMany({
     where: {
-      id: excludeLessonId ? { not: excludeLessonId } : undefined,
+      id: excludeLessonId ? (Array.isArray(excludeLessonId) ? { notIn: excludeLessonId } : { not: excludeLessonId }) : undefined,
       status: { in: ['planned', 'rescheduled'] }, startAt: { lt: endAt }, endAt: { gt: startAt },
       OR: [
         { lessonTeachers: { some: { courseTeacher: { membership: { userId: { in: allUsers } } } } } },

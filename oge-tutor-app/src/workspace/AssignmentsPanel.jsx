@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { legacyIsReadOnly } from './legacyPolicy.js';
 
 const assignmentStatus = { draft: 'Черновик', published: 'Выдана', closed: 'Закрыта', archived: 'Архив' };
 const recipientStatus = { assigned: 'Ожидает', submitted: 'Сдана', needs_revision: 'Доработка', reviewed: 'Проверена', exempted: 'Освобождён', closed: 'Закрыта' };
@@ -154,12 +155,12 @@ function RecipientDetail({ api, context, assignment, recipient, refresh, onAcces
   }
   return <div className="work-recipient-detail">
     <p>{recipientStatus[recipient.status]} · срок {dateTime(recipient.dueAt)}{recipient.overdue ? ' · просрочено' : ''}</p>
-    {context.role === 'student' && assignment.status === 'published' && !assignment.legacy && ['assigned', 'needs_revision'].includes(recipient.status) && <form className="work-form" onSubmit={event => { event.preventDefault(); act(() => api.submitAssignment(context, recipient, { text, fileIds: files.map(file => file.id) })); }}>
+    {context.role === 'student' && assignment.status === 'published' && !legacyIsReadOnly(assignment) && ['assigned', 'needs_revision'].includes(recipient.status) && <form className="work-form" onSubmit={event => { event.preventDefault(); act(() => api.submitAssignment(context, recipient, { text, fileIds: files.map(file => file.id) })); }}>
       <label>Ответ<textarea maxLength="30000" value={text} onChange={event => setText(event.target.value)} /></label>
       <FilePicker api={api} context={context} files={files} setFiles={setFiles} onError={err => setError(errorText(err))} />
       <button type="submit" disabled={busy || (!text.trim() && !files.length)}>Сдать работу</button>
     </form>}
-    {context.role !== 'student' && assignment.status === 'published' && !assignment.legacy && !['submitted', 'reviewed'].includes(recipient.status) && <form className="work-form" onSubmit={event => { event.preventDefault(); act(() => api.updateAssignmentRecipient(context, assignment.id, recipient, { reason: reason.trim(), dueAt: new Date(dueAt).toISOString() })); }}>
+    {context.role !== 'student' && assignment.status === 'published' && !legacyIsReadOnly(assignment) && !['submitted', 'reviewed'].includes(recipient.status) && <form className="work-form" onSubmit={event => { event.preventDefault(); act(() => api.updateAssignmentRecipient(context, assignment.id, recipient, { reason: reason.trim(), dueAt: new Date(dueAt).toISOString() })); }}>
       <label>Персональный срок<input type="datetime-local" required value={dueAt} onChange={event => setDueAt(event.target.value)} /></label>
       <label>Причина<input required minLength="5" maxLength="500" value={reason} onChange={event => setReason(event.target.value)} /></label>
       <div className="course-actions"><button disabled={busy} type="submit">Изменить срок</button>
@@ -174,7 +175,7 @@ function RecipientDetail({ api, context, assignment, recipient, refresh, onAcces
         {review.files.map(file => <button key={file.id} type="button" onClick={() => api.downloadWorkFile(context, file).catch(err => setError(errorText(err)))}>{file.originalName}</button>)}
         {review.legacyMaterials?.map((item, index) => safeHttpUrl(item.url) && <a key={index} href={safeHttpUrl(item.url)} rel="noreferrer" target="_blank">{item.title || 'Материал'}</a>)}
       </div>)}
-      {context.role === 'teacher' && assignment.canReview && !assignment.legacy && submission.attempt === submissions[0]?.attempt && <ReviewForm key={`${submission.id}:${submission.reviews.at(-1)?.id || ''}:${submission.reviews.at(-1)?.revision || 0}`} api={api} context={context} assignment={assignment} recipient={recipient} submission={submission} onSaved={() => { setVersion(value => value + 1); refresh(); }} onAccessError={onAccessError} />}
+      {context.role === 'teacher' && assignment.canReview && !legacyIsReadOnly(assignment) && submission.attempt === submissions[0]?.attempt && <ReviewForm key={`${submission.id}:${submission.reviews.at(-1)?.id || ''}:${submission.reviews.at(-1)?.revision || 0}`} api={api} context={context} assignment={assignment} recipient={recipient} submission={submission} onSaved={() => { setVersion(value => value + 1); refresh(); }} onAccessError={onAccessError} />}
     </section>)}
     {total > 10 && <div className="course-actions"><button type="button" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Назад</button><span>{page} / {Math.ceil(total / 10)}</span><button type="button" disabled={page * 10 >= total} onClick={() => setPage(p => p + 1)}>Далее</button></div>}
     {error && <p className="workspace-error" role="alert">{error}</p>}
@@ -210,17 +211,17 @@ function AssignmentDetail({ api, context, item, onChanged, onBack, onAccessError
   return <section className="work-detail"><div className="course-section-head"><div><button type="button" onClick={onBack}>← К списку</button><h2>{assignment.title}</h2></div><span>{assignmentStatus[assignment.status]}</span></div>
     <p>{assignment.courseTitle} · срок {dateTime(assignment.dueAt)}</p><p className="work-answer">{assignment.instructions}</p>
     {assignment.tasks?.length > 0 && <p>Задания: {assignment.tasks.map(task => task.code).join(', ')}</p>}
-    {assignment.legacy && <p className="workspace-muted">Историческая работа · редактирование в прежнем кабинете.</p>}
+    {legacyIsReadOnly(assignment) && <p className="workspace-muted">Историческая работа · редактирование в прежнем кабинете.</p>}
     {assignment.files?.map(file => <button key={file.id} type="button" onClick={() => api.downloadWorkFile(context, file).catch(err => setError(errorText(err)))}>{file.originalName}</button>)}
     {assignment.legacyMaterials?.map((material, index) => safeHttpUrl(material.url) && <a key={index} href={safeHttpUrl(material.url)} rel="noreferrer" target="_blank">{material.title || 'Материал'}</a>)}
-    {context.role !== 'student' && !assignment.legacy && <div className="work-actions">
+    {context.role !== 'student' && !legacyIsReadOnly(assignment) && <div className="work-actions">
       {assignment.status === 'draft' && <button type="button" onClick={() => setEditing(value => !value)}>Изменить</button>}
       {['published', 'closed', 'draft'].includes(assignment.status) && <label>Причина действия<input minLength="5" maxLength="500" value={reason} onChange={event => setReason(event.target.value)} /></label>}
       {assignment.status === 'published' && <button type="button" disabled={busy || reason.trim().length < 5} onClick={() => act(() => api.assignmentAction(context, assignment, 'close', reason.trim()))}>Закрыть работу</button>}
       {['draft', 'closed'].includes(assignment.status) && <button type="button" disabled={busy || reason.trim().length < 5} onClick={() => act(() => api.assignmentAction(context, assignment, 'archive', reason.trim()))}>В архив</button>}
     </div>}
     {editing && <AssignmentEditor api={api} context={context} courses={courses} assignment={assignment} onSaved={updated => { setAssignment(updated); setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} onAccessError={onAccessError} />}
-    {context.role !== 'student' && !assignment.legacy && ['draft', 'published'].includes(assignment.status) && <form className="work-publish" onSubmit={event => { event.preventDefault(); act(() => api.publishAssignment(context, assignment, selected, assignment.status === 'published')); }}>
+    {context.role !== 'student' && !legacyIsReadOnly(assignment) && ['draft', 'published'].includes(assignment.status) && <form className="work-publish" onSubmit={event => { event.preventDefault(); act(() => api.publishAssignment(context, assignment, selected, assignment.status === 'published')); }}>
       <RecipientChoice api={api} context={context} courseId={assignment.courseId} selected={selected} setSelected={setSelected} exclude={recipients.map(row => row.enrollmentId)} />
       <button type="submit" disabled={busy || !selected.length}>{assignment.status === 'draft' ? 'Выдать работу' : 'Добавить получателей'}</button>
     </form>}
@@ -306,14 +307,14 @@ function MaterialDetail({ api, context, item, courses, onBack, onChanged, onAcce
     <p>{material.subjectName} · {material.programName}</p><p className="work-answer">{material.description}</p>
     {safeHttpUrl(material.url) && <a href={safeHttpUrl(material.url)} target="_blank" rel="noreferrer">Открыть ссылку</a>}
     {material.file && <button type="button" onClick={() => api.downloadWorkFile(context, material.file).catch(err => setError(errorText(err)))}>{material.file.originalName}</button>}
-    {material.legacy && <p className="workspace-muted">Исторический материал · редактирование в прежнем кабинете.</p>}
+    {legacyIsReadOnly(material) && <p className="workspace-muted">Исторический материал · редактирование в прежнем кабинете.</p>}
     {(material.canEdit || material.canArchive) && <div className="work-actions">
       {material.canEdit && <button type="button" onClick={() => setEditing(true)}>Изменить</button>}
       {material.canArchive && <><label>Причина<input minLength="5" maxLength="500" value={reason} onChange={event => setReason(event.target.value)} /></label>
         <button type="button" disabled={busy || reason.trim().length < 5} onClick={() => act(() => api.archiveLearningMaterial(context, material, reason.trim()))}>В архив</button></>}
     </div>}
     {editing && <MaterialEditor api={api} context={context} courses={courses} item={material} onSaved={updated => { setMaterial(updated); setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} onAccessError={onAccessError} />}
-    {context.role !== 'student' && !material.legacy && !material.archivedAt && <form className="work-publish" onSubmit={event => { event.preventDefault(); act(() => api.publishLearningMaterial(context, material, { courseId, ...(lessonId ? { lessonId } : {}), recipientEnrollmentIds: selected })); }}>
+    {context.role !== 'student' && !legacyIsReadOnly(material) && !material.archivedAt && <form className="work-publish" onSubmit={event => { event.preventDefault(); act(() => api.publishLearningMaterial(context, material, { courseId, ...(lessonId ? { lessonId } : {}), recipientEnrollmentIds: selected })); }}>
       <h3>Опубликовать</h3><label>Курс<select required value={courseId} onChange={event => { setCourseId(event.target.value); setSelected([]); setLessonId(''); }}><option value="">Выберите курс</option>{courses.filter(c => c.status === 'active' && c.programVersionId === material.programVersionId).map(c => <option key={c.id} value={c.id}>{c.title}</option>)}</select></label>
       {courseId && <><label>Занятие<select value={lessonId} onChange={event => setLessonId(event.target.value)}><option value="">Курс целиком</option>{lessons.filter(l => l.status !== 'canceled').map(l => <option key={l.id} value={l.id}>{l.topic} · {dateTime(l.startAt)}</option>)}</select></label>
         <RecipientChoice api={api} context={context} courseId={courseId} selected={selected} setSelected={setSelected} /></>}

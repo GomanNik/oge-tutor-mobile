@@ -8,7 +8,7 @@ import StudentApp from '../student/StudentApp.jsx';
 import TeacherApp from '../teacher/TeacherApp.jsx';
 import { useBackendStore } from './useBackendStore.js';
 import { Button, MobileFrame } from '../shared/ui.jsx';
-import { getStoredApiToken } from '../api/authToken.js';
+import { createWorkspaceClient } from '../workspace/workspaceClient.js';
 import WorkspaceApp from '../workspace/WorkspaceApp.jsx';
 
 const APP_MODE_KEY = 'oge-tutor-app-mode';
@@ -16,10 +16,10 @@ const APP_MODE_KEY = 'oge-tutor-app-mode';
 function initialMode() {
   if (typeof window === 'undefined') return 'workspace';
   if (window.location.pathname === '/workspace-invite') return 'workspace';
-  if (new URLSearchParams(window.location.search).has('token')) return 'legacy';
+  if (hasAccessTokenInUrl()) return 'workspace';
   const saved = window.sessionStorage.getItem(APP_MODE_KEY);
   if (saved) return saved;
-  if (getStoredApiToken() || import.meta.env.VITE_USE_MOCK === 'true') return 'legacy';
+  if (import.meta.env.VITE_USE_MOCK === 'true') return 'legacy';
   return 'workspace';
 }
 
@@ -83,6 +83,14 @@ function LegacyApp({ onSpaces }) {
 
 export default function App() {
   const [mode, setMode] = useState(initialMode);
+  const [legacyAllowed, setLegacyAllowed] = useState(import.meta.env.VITE_USE_MOCK === 'true' ? true : null);
+  useEffect(() => {
+    if (import.meta.env.VITE_USE_MOCK === 'true') return;
+    let alive = true;
+    createWorkspaceClient().runtime().then(result => { if (alive) setLegacyAllowed(result.legacyApiMode === 'enabled'); }).catch(() => { if (alive) setLegacyAllowed(false); });
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => { if (legacyAllowed === false && mode === 'legacy') setMode('workspace'); }, [legacyAllowed, mode]);
   useEffect(() => {
     window.sessionStorage.setItem(APP_MODE_KEY, mode);
   }, [mode]);
@@ -90,7 +98,8 @@ export default function App() {
     window.sessionStorage.setItem(APP_MODE_KEY, value);
     setMode(value);
   }
-  return mode === 'workspace'
+  if (mode === 'legacy' && legacyAllowed === null) return <div className="workspace-auth-page"><p>Загрузка…</p></div>;
+  return mode === 'workspace' || legacyAllowed === false
     ? <WorkspaceApp onLegacy={() => changeMode('legacy')} />
     : <LegacyApp onSpaces={() => changeMode('workspace')} />;
 }

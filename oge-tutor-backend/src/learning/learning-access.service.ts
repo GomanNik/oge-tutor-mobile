@@ -29,9 +29,9 @@ export class LearningAccessService {
     const member = await tx.workspaceMembership.findUnique({ where: { workspaceId_userId: { workspaceId: ctx.workspaceId, userId: ctx.userId } }, include: { roles: true, workspace: true } });
     if (member?.status !== 'active' || member.workspace.status !== 'active' || !member.roles.some(r => r.role === ctx.role && !r.revokedAt)) throw forbidden();
   }
-  async transaction<T>(ctx: WorkspaceContext, action: (tx: LearningTx) => Promise<T>) {
+  async transaction<T>(ctx: WorkspaceContext, action: (tx: LearningTx) => Promise<T>, timeout = 15000) {
     for (let attempt = 0; ; attempt++) {
-      try { return await this.prisma.$transaction(async tx => { await this.live(tx, ctx); return action(tx); }, { isolationLevel: 'Serializable', timeout: 15000 }); }
+      try { return await this.prisma.$transaction(async tx => { await this.live(tx, ctx); return action(tx); }, { isolationLevel: 'Serializable', timeout }); }
       catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));

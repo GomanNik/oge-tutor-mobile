@@ -153,6 +153,29 @@ try {
   assert.equal(await count('LessonParticipant'), 1);
   assert.deepEqual(await rows(`SELECT id,"courseId" FROM "Lesson" WHERE id='legacy-lesson'`),
     [{ id: 'legacy-lesson', courseId: 'legacy-course-legacy-s1' }]);
+  await db.$executeRawUnsafe(`INSERT INTO "LessonSeries" (id,"courseId",topic,format,"startsAtLocal","untilLocalDate",timezone,frequency,"durationMinutes","operatorUserId","operatorRole","updatedAt")
+    VALUES ('migration-series','legacy-course-legacy-s1','Series constraints','individual','2026-11-01T14:00','2026-12-01','UTC','weekly',60,'legacy-tu1','teacher',NOW())`);
+  await db.$executeRawUnsafe(`INSERT INTO "LessonSeriesTeacher" ("seriesId","courseId","courseTeacherId") VALUES ('migration-series','legacy-course-legacy-s1','legacy-course-teacher-legacy-s1')`);
+  await db.$executeRawUnsafe(`INSERT INTO "LessonSeriesParticipant" ("seriesId","courseId","enrollmentId") VALUES ('migration-series','legacy-course-legacy-s1','legacy-enrollment-legacy-s1')`);
+  await assert.rejects(db.$executeRawUnsafe(`INSERT INTO "LessonSeriesTeacher" ("seriesId","courseId","courseTeacherId") VALUES ('migration-series','legacy-course-legacy-s1','legacy-course-teacher-legacy-s2')`));
+  await assert.rejects(db.$executeRawUnsafe(`INSERT INTO "LessonSeriesParticipant" ("seriesId","courseId","enrollmentId") VALUES ('migration-series','legacy-course-legacy-s1','legacy-enrollment-legacy-s2')`));
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "LessonSeries" SET interval=0 WHERE id='migration-series'`));
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "LessonSeries" SET "operatorUserId"='missing-user' WHERE id='migration-series'`));
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "LessonSeries" SET "operatorRole"='student' WHERE id='migration-series'`));
+  await assert.rejects(db.$executeRawUnsafe(`UPDATE "Lesson" SET "seriesId"='migration-series',"seriesOccurrenceKey"='2026-11-01' WHERE id='legacy-lesson'`));
+  await db.$executeRawUnsafe(`UPDATE "Lesson" SET "seriesId"='migration-series',"seriesRevision"=0,"seriesOccurrenceKey"='2026-11-01' WHERE id='legacy-lesson'`);
+  await assert.rejects(db.$executeRawUnsafe(`INSERT INTO "Lesson" (id,"courseId",topic,"startAt","endAt",timezone,"durationMinutes","seriesId","seriesRevision","seriesOccurrenceKey","updatedAt")
+    VALUES ('duplicate-occurrence','legacy-course-legacy-s1','Duplicate',NOW(),NOW()+INTERVAL '1 hour','UTC',60,'migration-series',0,'2026-11-01',NOW())`));
+  await assert.rejects(db.$executeRawUnsafe(`DELETE FROM "LessonSeries" WHERE id='migration-series'`));
+  await db.$executeRawUnsafe(`UPDATE "Lesson" SET status='completed',"completedAt"=NOW() WHERE id='legacy-lesson'`);
+  await db.$executeRawUnsafe(`SELECT learning_record_lesson('legacy-lesson')`);
+  const recordedLessonEvents = (await rows(`SELECT COUNT(*)::int AS count FROM "LearningProgressEvent" WHERE source='lesson' AND evidence->>'lessonId'='legacy-lesson'`))[0].count;
+  assert.equal(recordedLessonEvents, 1);
+  await db.$executeRawUnsafe(`SELECT learning_record_lesson('legacy-lesson')`);
+  assert.equal((await rows(`SELECT COUNT(*)::int AS count FROM "LearningProgressEvent" WHERE source='lesson' AND evidence->>'lessonId'='legacy-lesson'`))[0].count, recordedLessonEvents);
+  assert.equal(await count('LegacyCutover'), 0);
+  await db.$executeRawUnsafe(`INSERT INTO "LegacyCutover" (id) VALUES ('v2-authoritative')`);
+  await assert.rejects(db.$executeRawUnsafe(`INSERT INTO "LegacyCutover" (id) VALUES ('v2-authoritative')`));
   assert.deepEqual(await rows(`SELECT c.id,c.status,e.status AS "enrollmentStatus" FROM "Course" c JOIN "Enrollment" e ON e."courseId"=c.id WHERE c.id='legacy-course-legacy-s1'`),
     [{ id: 'legacy-course-legacy-s1', status: 'active', enrollmentStatus: 'active' }]);
   assert.deepEqual(await rows(`SELECT id,status FROM "ProgramVersion" WHERE id='legacy-version-oge-math'`),

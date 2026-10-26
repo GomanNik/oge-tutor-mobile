@@ -5,6 +5,7 @@ import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { checkRevision } from '../assignments/work-access.service';
 import { DeliveryQueryDto, MarkNotificationDto, NotificationPreferenceDto, NotificationQueryDto, ReadAllNotificationsDto, RetryDeliveryDto } from './learning.dto';
 import { LearningAccessService, learningConflict, learningCursor, parseLearningCursor } from './learning-access.service';
+import { legacyApiMode } from '../workspace/legacy-mode';
 
 export const notificationDto = (row: LearningNotification) => ({ id: row.id, type: row.type, title: row.title, message: row.message,
   targetType: row.targetType, targetId: row.targetId, readAt: row.readAt, status: row.readAt ? 'read' : 'unread', revision: row.revision, createdAt: row.createdAt,
@@ -35,7 +36,7 @@ export class LearningNotificationsService {
       checkRevision(row.revision, revision);
       if (row.legacyNotificationId && !body.read && await tx.notification.count({ where: { id: row.legacyNotificationId, status: 'resolved' } })) throw learningConflict('legacy_resolved', 'Завершённое историческое напоминание нельзя вернуть в непрочитанные.');
       const updated = await tx.learningNotification.update({ where: { id }, data: { readAt: body.read ? row.readAt || new Date() : null, revision: { increment: 1 } } });
-      if (row.legacyNotificationId) await tx.notification.updateMany({ where: { id: row.legacyNotificationId, status: { not: 'resolved' } }, data: { status: body.read ? 'read' : 'unread' } });
+      if (row.legacyNotificationId && legacyApiMode() !== 'disabled') await tx.notification.updateMany({ where: { id: row.legacyNotificationId, status: { not: 'resolved' } }, data: { status: body.read ? 'read' : 'unread' } });
       return changed(ctx, notificationDto(updated));
     });
   }
@@ -46,7 +47,7 @@ export class LearningNotificationsService {
       const where = { ...this.scope(ctx), readAt: null, createdAt: { lte: before } };
       const legacy = await tx.learningNotification.findMany({ where: { ...where, legacyNotificationId: { not: null } }, select: { legacyNotificationId: true } });
       const result = await tx.learningNotification.updateMany({ where, data: { readAt: new Date(), revision: { increment: 1 } } });
-      await tx.notification.updateMany({ where: { id: { in: legacy.flatMap(n => n.legacyNotificationId ? [n.legacyNotificationId] : []) }, status: { not: 'resolved' } }, data: { status: 'read' } });
+      if (legacyApiMode() !== 'disabled') await tx.notification.updateMany({ where: { id: { in: legacy.flatMap(n => n.legacyNotificationId ? [n.legacyNotificationId] : []) }, status: { not: 'resolved' } }, data: { status: 'read' } });
       return changed(ctx, { updatedCount: result.count });
     });
   }

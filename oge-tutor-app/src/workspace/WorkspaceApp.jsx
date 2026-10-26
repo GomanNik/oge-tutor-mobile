@@ -5,6 +5,8 @@ import CoursesPanel from './CoursesPanel.jsx';
 import LessonsPanel from './LessonsPanel.jsx';
 import AssignmentsPanel from './AssignmentsPanel.jsx';
 import { NotificationsPanel, ProgressPanel } from './LearningPanel.jsx';
+import AccountPanel, { AccountRecovery } from './AccountPanel.jsx';
+import ReleasePanel from './ReleasePanel.jsx';
 
 const MODE_KEY = 'oge-tutor-workspace-context';
 const ROLES = ['admin', 'teacher', 'student'];
@@ -14,7 +16,7 @@ const DELIVERY_LABELS = { queued: 'В очереди', sent: 'Отправлен
 
 function showError(error) { return error?.message || 'Не удалось выполнить запрос.'; }
 
-function Login({ onLogin, busy, error }) {
+function Login({ onLogin, busy, error, onRecovery }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   return <div className="workspace-auth-page"><form className="workspace-auth" onSubmit={event => { event.preventDefault(); onLogin(email, password); }}>
@@ -24,6 +26,7 @@ function Login({ onLogin, busy, error }) {
     <label>Пароль<input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></label>
     {error && <p className="workspace-error" role="alert">{error}</p>}
     <button type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти'}</button>
+    <button type="button" disabled={busy} onClick={onRecovery}>Забыли пароль?</button>
   </form></div>;
 }
 
@@ -197,6 +200,19 @@ export default function WorkspaceApp({ onLegacy }) {
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).has('notification') ? 'notifications' : 'home');
   const [emailNotice, setEmailNotice] = useState(() => new URLSearchParams(window.location.search).get('notification') || '');
   const [openedTarget, setOpenedTarget] = useState(null);
+  const [recovery, setRecovery] = useState(() => {
+    if (window.location.pathname === '/workspace-invite') return null;
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get('token') || url.searchParams.get('resetToken') || url.searchParams.get('inviteToken');
+    if (!token) return null;
+    return { token };
+  });
+  useEffect(() => {
+    if (!recovery?.token) return;
+    const url = new URL(window.location.href);
+    for (const key of ['token', 'resetToken', 'inviteToken']) url.searchParams.delete(key);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+  }, [recovery]);
   const openNotificationTarget = useCallback(target => {
     setOpenedTarget(target); setEmailNotice('');
     setView({ lesson: 'lessons', assignment: 'assignments', material: 'assignments', progress: 'progress', course: 'courses' }[target.type] || 'notifications');
@@ -205,9 +221,9 @@ export default function WorkspaceApp({ onLegacy }) {
   const [inviteToken, setInviteToken] = useState(() => {
     if (window.location.pathname !== '/workspace-invite') return '';
     const token = new URLSearchParams(window.location.search).get('token') || '';
-    window.history.replaceState({}, '', '/workspace-invite');
     return token;
   });
+  useEffect(() => { if (inviteToken) window.history.replaceState({}, '', '/workspace-invite'); }, [inviteToken]);
 
   const onAccessError = useCallback(async err => {
     if (err?.status !== 401 && err?.status !== 403) return;
@@ -282,9 +298,11 @@ export default function WorkspaceApp({ onLegacy }) {
   const panelKey = context ? `${context.workspaceId}:${context.role}:${openedTarget?.id || ''}` : 'global';
   let content = <main className="workspace-empty"><h1>Нет доступных пространств</h1></main>;
   if (contextRefreshing) content = <main className="workspace-empty"><p>Обновляем доступ…</p></main>;
+  else if (activeView === 'account' && me) content = <AccountPanel api={api} me={me} onSaved={setMe} onAccessError={onAccessError} onPasswordChanged={() => { api.clearToken(); setMe(null); setContexts([]); setSelectedKey(''); window.sessionStorage.removeItem(MODE_KEY); }} />;
   else if (activeView === 'globalCatalog' && me?.catalogManage) content = <CatalogPanel key="global" api={api} context={null} canManage onAccessError={onAccessError} />;
   else if (context) {
-    if (activeView === 'catalog') content = <CatalogPanel key={panelKey} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} />;
+    if (activeView === 'release' && context.role === 'admin') content = <ReleasePanel key={panelKey} api={api} context={context} onAccessError={onAccessError} />;
+    else if (activeView === 'catalog') content = <CatalogPanel key={panelKey} api={api} context={context} canManage={context.role === 'admin'} onAccessError={onAccessError} />;
     else if (activeView === 'lessons') content = <LessonsPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} openLessonId={openedTarget?.type === 'lesson' ? openedTarget.id : ''} />;
     else if (activeView === 'assignments') content = <AssignmentsPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} openTarget={openedTarget} />;
     else if (activeView === 'progress') content = <ProgressPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} currentUserId={me?.id} openEnrollmentId={openedTarget?.type === 'progress' ? openedTarget.id : ''} />;
@@ -293,9 +311,10 @@ export default function WorkspaceApp({ onLegacy }) {
     else content = <AdminPanel key={panelKey} api={api} context={context} onAccessError={onAccessError} />;
   }
 
+  if (recovery) return <AccountRecovery api={api} token={recovery.token} onClose={() => setRecovery(null)} />;
   if (loading) return <div className="workspace-auth-page"><p>Загрузка…</p></div>;
   if (inviteToken) return <InvitationAccept token={inviteToken} api={api} onAccepted={accept} me={me} onLogin={login} busy={busy} error={error} />;
-  if (!me) return <Login onLogin={(email, password) => { void login(email, password).catch(() => {}); }} busy={busy} error={error} />;
+  if (!me) return <Login onLogin={(email, password) => { void login(email, password).catch(() => {}); }} busy={busy} error={error} onRecovery={() => setRecovery({ token: '' })} />;
   return <div className="workspace-page">
     <header className="workspace-header"><div><span className="workspace-mark">OGE Tutor</span><strong>{activeView === 'globalCatalog' ? 'Общий каталог' : current?.name || 'Кабинет'}</strong></div><div className="workspace-header-actions">
       {context && <div className="workspace-view-nav">{context.role === 'admin' && <button type="button" aria-current={activeView === 'home' ? 'page' : undefined} onClick={() => navigate('home')}>Кабинет</button>}<button type="button" aria-current={activeView === 'courses' || (activeView === 'home' && context.role !== 'admin') ? 'page' : undefined} onClick={() => navigate('courses')}>Курсы</button><button type="button" aria-current={activeView === 'lessons' ? 'page' : undefined} onClick={() => navigate('lessons')}>Расписание</button><button type="button" aria-current={activeView === 'assignments' ? 'page' : undefined} onClick={() => navigate('assignments')}>Работы</button><button type="button" aria-current={activeView === 'progress' ? 'page' : undefined} onClick={() => navigate('progress')}>Прогресс</button><button type="button" aria-current={activeView === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}>Уведомления</button><button type="button" aria-current={activeView === 'catalog' ? 'page' : undefined} onClick={() => navigate('catalog')}>Каталог</button></div>}
@@ -304,6 +323,8 @@ export default function WorkspaceApp({ onLegacy }) {
         {choices.map(choice => <option key={`${choice.workspaceId}:${choice.role}`} value={`${choice.workspaceId}:${choice.role}`}>{choice.name} · {ROLE_LABELS[choice.role]}</option>)}
       </select></label>}
       <button type="button" onClick={logout}>Выйти</button>
+      {context?.role === 'admin' && <button type="button" aria-current={activeView === 'release' ? 'page' : undefined} onClick={() => navigate('release')}>Сверка данных</button>}
+      <button type="button" aria-current={activeView === 'account' ? 'page' : undefined} onClick={() => navigate('account')}>Аккаунт</button>
     </div></header>
     {content}
   </div>;

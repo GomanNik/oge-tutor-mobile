@@ -5,10 +5,11 @@ import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { CreateLearningMaterialDto, MaterialQueryDto, PublishMaterialDto, UpdateLearningMaterialDto, WorkReasonDto } from './assignments.dto';
 import { checkRevision, fileDto, WorkAccessService, workConflict, WorkTx } from './work-access.service';
 import { LearningEventsService } from '../learning/learning-events.service';
+import { legacyReadOnly } from '../workspace/legacy-mode';
 
 const include = { file: true, programVersion: { include: { program: { include: { subject: true } } } } } satisfies Prisma.LearningMaterialInclude;
 type Row = Prisma.LearningMaterialGetPayload<{ include: typeof include }>;
-const dto = (row: Row) => ({ id: row.id, programVersionId: row.programVersionId, programName: row.programVersion.program.name, subjectName: row.programVersion.program.subject.name, taskDefinitionIds: row.taskDefinitionIds, title: row.title, description: row.description, url: row.url, file: row.file ? fileDto(row.file) : null, legacy: Boolean(row.legacyAttachmentId), legacyState: row.legacyAttachmentId ? row.legacyState : undefined, revision: row.revision, archivedAt: row.archivedAt, createdAt: row.createdAt });
+const dto = (row: Row) => ({ id: row.id, programVersionId: row.programVersionId, programName: row.programVersion.program.name, subjectName: row.programVersion.program.subject.name, taskDefinitionIds: row.taskDefinitionIds, title: row.title, description: row.description, url: row.url, file: row.file ? fileDto(row.file) : null, legacy: Boolean(row.legacyAttachmentId), legacyReadOnly: legacyReadOnly(row.legacyAttachmentId), legacyState: row.legacyAttachmentId ? row.legacyState : undefined, revision: row.revision, archivedAt: row.archivedAt, createdAt: row.createdAt });
 const changed = <T>(ctx: WorkspaceContext, item: T) => ({ item, changed: ['materials'], requestId: ctx.requestId });
 
 @Injectable()
@@ -27,7 +28,7 @@ export class LearningMaterialsService {
     if (ctx.role === 'student') throw forbidden();
     const row = await this.visible(tx, ctx, id);
     if (ctx.role !== 'admin' && row.createdByUserId !== ctx.userId) throw forbidden();
-    if (row.legacyAttachmentId) throw workConflict('legacy_material_read_only', 'Исторический материал редактируется в прежнем кабинете.');
+    if (legacyReadOnly(row.legacyAttachmentId)) throw workConflict('legacy_material_read_only', 'Исторический материал редактируется в прежнем кабинете.');
     return row;
   }
   private source(fileId?: string | null, url?: string) {
@@ -50,7 +51,7 @@ export class LearningMaterialsService {
       const row = await this.visible(tx, ctx, id);
       const publications = await tx.materialPublication.findMany({ where: { materialId: id, ...(ctx.role === 'student' ? { revokedAt: null, course: { status: 'active' }, recipients: { some: { enrollment: { status: 'active', membership: { userId: ctx.userId } } } } } : ctx.role === 'teacher' ? { course: this.access.teacherScope(ctx) } : {}) }, include: { recipients: { where: ctx.role === 'student' ? { enrollment: { membership: { userId: ctx.userId } } } : {} } }, orderBy: { publishedAt: 'desc' }, take: 100 });
       const publicationCount = ctx.role === 'student' ? 0 : await tx.materialPublication.count({ where: { materialId: id } });
-      const canManage = ctx.role !== 'student' && !row.legacyAttachmentId && (ctx.role === 'admin' || row.createdByUserId === ctx.userId);
+      const canManage = ctx.role !== 'student' && !legacyReadOnly(row.legacyAttachmentId) && (ctx.role === 'admin' || row.createdByUserId === ctx.userId);
       return { item: { ...dto(row), canEdit: canManage && !row.archivedAt && !publicationCount, canArchive: canManage && !row.archivedAt, publications: publications.map(p => ({ id: p.id, courseId: p.courseId, lessonId: p.lessonId, revision: p.revision, publishedAt: p.publishedAt, revokedAt: p.revokedAt, recipientEnrollmentIds: p.recipients.map(r => r.enrollmentId) })) } };
     });
   }
@@ -88,7 +89,7 @@ export class LearningMaterialsService {
   async publish(ctx: WorkspaceContext, id: string, body: PublishMaterialDto, revision: number, key: string) {
     return this.access.transaction(ctx, async tx => {
       const row = await this.visible(tx, ctx, id);
-      if (row.legacyAttachmentId) throw workConflict('legacy_material_read_only', 'Исторический материал публикуется в прежнем кабинете.');
+      if (legacyReadOnly(row.legacyAttachmentId)) throw workConflict('legacy_material_read_only', 'Исторический материал публикуется в прежнем кабинете.');
       const course = await this.access.editor(tx, ctx, body.courseId);
       return this.access.once(tx, ctx, `materials:${id}:publish`, key, { ...body, revision }, async () => {
         checkRevision(row.revision, revision);
@@ -111,7 +112,7 @@ export class LearningMaterialsService {
   async revoke(ctx: WorkspaceContext, id: string, publicationId: string, body: WorkReasonDto, revision: number) {
     return this.access.transaction(ctx, async tx => {
       const row = await this.visible(tx, ctx, id);
-      if (row.legacyAttachmentId) throw workConflict('legacy_material_read_only', 'Исторический материал управляется в прежнем кабинете.');
+      if (legacyReadOnly(row.legacyAttachmentId)) throw workConflict('legacy_material_read_only', 'Исторический материал управляется в прежнем кабинете.');
       const publication = await tx.materialPublication.findFirst({ where: { id: publicationId, materialId: id } });
       if (!publication) throw notFound();
       await this.access.editor(tx, ctx, publication.courseId);

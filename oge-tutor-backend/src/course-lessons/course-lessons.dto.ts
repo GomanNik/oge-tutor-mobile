@@ -30,6 +30,7 @@ export class CreateCourseLessonDto {
 }
 
 export class UpdateCourseLessonDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(5, 500) @Matches(/\S/) reason?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(2, 160) @Matches(/\S/) topic?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(TIMESTAMP) startAt?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(TIMESTAMP) endAt?: string;

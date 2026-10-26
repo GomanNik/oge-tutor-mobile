@@ -235,6 +235,7 @@ model User {
   learningProgressEvents LearningProgressEvent[]
   learningNotifications LearningNotification[]
   learningPreferences LearningNotificationPreference[]
+  operatedLessonSeries LessonSeries[] @relation("LessonSeriesOperator")
 
   @@index([role])
 }
@@ -622,6 +623,7 @@ model Course {
   teachers CourseTeacher[]
   enrollments Enrollment[]
   lessons Lesson[]
+  lessonSeries LessonSeries[]
   legacyMapping LegacyCourseMapping?
   assignments Assignment[]
   materialPublications MaterialPublication[]
@@ -646,6 +648,7 @@ model CourseTeacher {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   lessonTeachers LessonTeacher[]
+  seriesTeachers LessonSeriesTeacher[]
 
   @@unique([id, courseId])
   @@index([courseId, status, role])
@@ -671,6 +674,7 @@ model Enrollment {
   updatedAt DateTime @updatedAt
   legacyMapping LegacyCourseMapping?
   lessonParticipants LessonParticipant[]
+  seriesParticipants LessonSeriesParticipant[]
   assignmentRecipients AssignmentRecipient[]
   materialRecipients MaterialPublicationRecipient[]
   learningProgressEvents LearningProgressEvent[]
@@ -708,6 +712,11 @@ model Lesson {
   format            CourseFormat   @default(individual)
   revision          Int            @default(0)
   source            LessonSource   @default(manual)
+  seriesId          String?
+  series            LessonSeries? @relation(fields: [seriesId, courseId], references: [id, courseId], onDelete: Restrict)
+  seriesRevision    Int?
+  seriesOccurrenceKey String?
+  seriesException   Boolean @default(false)
   completedAt       DateTime?
   completionComment String         @default("")
   note              String         @default("")
@@ -721,12 +730,93 @@ model Lesson {
   materialPublications MaterialPublication[]
 
   @@unique([id, courseId])
+  @@unique([seriesId, seriesRevision, seriesOccurrenceKey])
+  @@index([seriesId, startAt])
   @@index([courseId, status, startAt, id])
   @@index([teacherId])
   @@index([studentId])
   @@index([startAt])
   @@index([teacherId, status, startAt])
   @@index([studentId, status, startAt])
+}
+
+enum LessonSeriesStatus {
+  active
+  paused
+  canceled
+  completed
+}
+
+enum LessonSeriesFrequency {
+  daily
+  weekly
+  monthly
+}
+
+model LessonSeries {
+  id String @id @default(cuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  topic String
+  note String @default("")
+  format CourseFormat
+  startsAtLocal String
+  untilLocalDate String
+  timezone String
+  frequency LessonSeriesFrequency
+  interval Int @default(1)
+  weekdays Int[] @default([])
+  monthDays Int[] @default([])
+  excludedDates String[] @default([])
+  durationMinutes Int
+  materializeDays Int @default(45)
+  dstDisambiguation String @default("reject")
+  status LessonSeriesStatus @default(active)
+  revision Int @default(0)
+  generation Int @default(0)
+  operatorUserId String
+  operator User @relation("LessonSeriesOperator", fields: [operatorUserId], references: [id], onDelete: Restrict)
+  operatorRole WorkspaceRole
+  nextRunAt DateTime @default(now())
+  failures Int @default(0)
+  lastErrorCode String @default("")
+  materializedThrough DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  teachers LessonSeriesTeacher[]
+  participants LessonSeriesParticipant[]
+  lessons Lesson[]
+
+  @@unique([id, courseId])
+  @@index([courseId, status, createdAt, id])
+  @@index([status, nextRunAt])
+}
+
+model LessonSeriesTeacher {
+  seriesId String
+  courseId String
+  series LessonSeries @relation(fields: [seriesId, courseId], references: [id, courseId], onDelete: Restrict)
+  courseTeacherId String
+  courseTeacher CourseTeacher @relation(fields: [courseTeacherId, courseId], references: [id, courseId], onDelete: Restrict)
+
+  @@id([seriesId, courseTeacherId])
+  @@index([courseTeacherId])
+}
+
+model LessonSeriesParticipant {
+  seriesId String
+  courseId String
+  series LessonSeries @relation(fields: [seriesId, courseId], references: [id, courseId], onDelete: Restrict)
+  enrollmentId String
+  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Restrict)
+
+  @@id([seriesId, enrollmentId])
+  @@index([enrollmentId])
+}
+
+model LegacyCutover {
+  id String @id
+  cutoverAt DateTime @default(now())
 }
 
 model LessonTeacher {

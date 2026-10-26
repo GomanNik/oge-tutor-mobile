@@ -5,6 +5,7 @@ import { AppError, forbidden, notFound, validationError } from '../common/app-er
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkspaceContext, WorkspaceContextService } from '../workspace/workspace-context.service';
 import { LearningEventsService } from '../learning/learning-events.service';
+import { legacyReadOnly } from '../workspace/legacy-mode';
 import { AddCourseTeacherDto, CourseQueryDto, CreateCourseDto, CreateEnrollmentDto, EnrollmentBatchDto, UpdateCourseDto, UpdateCourseTeacherDto, UpdateEnrollmentDto } from './courses.dto';
 
 const courseInclude = {
@@ -47,7 +48,7 @@ function courseDto(row: CourseRow, role: WorkspaceContext['role']) {
     title: row.title, defaultFormat: row.defaultFormat, capacity: row.capacity,
     startsOn: day(row.startsOn), endsOn: row.endsOn ? day(row.endsOn) : null,
     timezone: row.timezone, status: row.status, revision: row.revision,
-    activeEnrollmentCount: role === 'student' ? null : row._count.enrollments, legacy: Boolean(row.legacyMapping),
+    activeEnrollmentCount: role === 'student' ? null : row._count.enrollments, legacy: Boolean(row.legacyMapping), legacyReadOnly: legacyReadOnly(row.legacyMapping),
     createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
 }
@@ -154,7 +155,7 @@ export class CoursesService {
   private async editable(tx: Prisma.TransactionClient, ctx: WorkspaceContext, id: string) {
     const course = await tx.course.findFirst({ where: { id, workspaceId: ctx.workspaceId }, include: { legacyMapping: true } });
     if (!course) throw notFound();
-    if (course.legacyMapping) throw conflict('legacy_course_read_only', 'Исторический курс редактируется в прежнем кабинете до переноса занятий и работ.');
+    if (legacyReadOnly(course.legacyMapping)) throw conflict('legacy_course_read_only', 'Исторический курс редактируется в прежнем кабинете до переключения на v2.');
     return course;
   }
 
@@ -425,7 +426,7 @@ export class CoursesService {
     this.contexts.requireAdmin(ctx);
     const course = await this.prisma.course.findFirst({ where: { id: body.courseId, workspaceId: ctx.workspaceId }, include: { legacyMapping: true } });
     if (!course) throw notFound();
-    if (course.legacyMapping) throw conflict('legacy_course_read_only', 'Исторический курс редактируется в прежнем кабинете.');
+    if (legacyReadOnly(course.legacyMapping)) throw conflict('legacy_course_read_only', 'Исторический курс редактируется в прежнем кабинете.');
     if (['completed', 'archived'].includes(course.status)) throw conflict('invalid_state', 'Курс уже завершён.');
     return this.assessBatch(this.prisma, ctx, body, course);
   }

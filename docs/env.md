@@ -118,3 +118,11 @@ SMTP_SECURE
 Use `MAILER_PROVIDER=smtp` for staging and production. Use `MAILER_PROVIDER=noop` only for development or tests.
 
 `DATABASE_URL` must match the actual database used by Compose or the managed database provider. Do not put secret values in workflow files or docs.
+
+## Block 7 Controls
+
+`LEGACY_API_MODE` defaults to `enabled`; `read_only` rejects educational v1 writes, and `disabled` retires v1 while enabling writes to imported resources through v2. Disabled requires `LEGACY_CUTOVER_CONFIRM=verified-backup-and-reconciliation` and persists a database barrier against configuration-only rollback. Do not enable it on real data without the [cutover runbook](platform/block-7-operations.md).
+
+`LESSON_SERIES_WORKER_ENABLED`, `LEARNING_NOTIFICATIONS_WORKER_ENABLED` and `WORKSPACE_INVITATIONS_WORKER_ENABLED` can each be set to `false` to stop the corresponding periodic worker. Test and operator CLI processes do not start these timers. Normal HTTP processes must not set `CLI_MODE=true`.
+
+`RELEASE_POSTGRES_CONTAINER` and optional `RELEASE_DRILL_REPORT` are only for the disposable restore drill, not normal application configuration. The drill additionally requires a test/e2e/ci DATABASE_URL and a built backend. It is not a command to restore a production backup.

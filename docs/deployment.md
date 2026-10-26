@@ -206,6 +206,8 @@ The workflow does not install Docker on the server. Provisioning remains a one-t
 
 ## Rollback
 
+**Block 7 cutover exception:** the commands below apply only before authoritative v2 cutover and only to a compatible schema. After `LegacyCutover('v2-authoritative')` exists, do not deploy old writers, remove the marker, run migrate down, or re-enable v1 to bypass startup refusal. Use a forward fix or an explicitly approved, verified restore of the database **and files** with reconciliation of post-snapshot writes. Follow [the cutover and recovery runbook](platform/block-7-operations.md).
+
 To roll back on the VPS:
 
 ```bash

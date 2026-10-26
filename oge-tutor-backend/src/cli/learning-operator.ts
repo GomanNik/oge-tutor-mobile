@@ -8,6 +8,7 @@ async function main() {
   const command = process.argv[2];
   if (!['rebuild-progress', 'deliver'].includes(command)) throw new Error('Usage: learning:operator rebuild-progress|deliver');
   process.env.LEARNING_NOTIFICATIONS_WORKER_ENABLED = 'false';
+  process.env.CLI_MODE = 'true';
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   try {
     const count = command === 'rebuild-progress' ? await app.get(LearningProgressService).rebuildProgress() : await app.get(LearningDeliveryWorker).runBatch(50);

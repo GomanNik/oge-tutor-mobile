@@ -7,6 +7,7 @@ import { WorkspaceContext } from '../workspace/workspace-context.service';
 import { CancelCourseLessonDto, CompleteCourseLessonDto, CorrectLessonAttendanceDto, CreateCourseLessonDto, LessonCalendarQueryDto, UpdateCourseLessonDto } from './course-lessons.dto';
 import { lessonConflicts, lockLessonPeople } from './lesson-schedule';
 import { LearningEventsService } from '../learning/learning-events.service';
+import { legacyReadOnly } from '../workspace/legacy-mode';
 
 const lessonInclude = {
   course: { select: { title: true, workspaceId: true, legacyMapping: true } },
@@ -43,7 +44,8 @@ function dto(row: LessonRow, ctx: WorkspaceContext) {
     id: row.id, courseId: row.courseId, courseTitle: row.course.title,
     topic: row.topic, startAt: row.startAt, endAt: row.endAt, timezone: row.timezone,
     format: row.format, status: row.status, revision: row.revision,
-    completedAt: row.completedAt, legacy: Boolean(row.course.legacyMapping),
+    completedAt: row.completedAt, legacy: Boolean(row.course.legacyMapping), legacyReadOnly: legacyReadOnly(row.course.legacyMapping),
+    seriesId: row.seriesId, seriesRevision: row.seriesRevision, seriesOccurrenceKey: row.seriesOccurrenceKey, seriesException: row.seriesException,
     ...(isStudent ? {} : { note: row.note, completionComment: row.completionComment }),
     teachers: row.lessonTeachers.map(link => ({
       courseTeacherId: link.courseTeacherId, userId: link.courseTeacher.membership.userId,
@@ -118,22 +120,51 @@ export class CourseLessonsService {
   private async courseFor(tx: Tx, ctx: WorkspaceContext, id: string) {
     const course = await tx.course.findFirst({ where: { id, workspaceId: ctx.workspaceId }, include: { legacyMapping: true } });
     if (!course) throw notFound();
-    if (course.legacyMapping) throw conflict('legacy_course_read_only', 'Исторические занятия пока редактируются в прежнем кабинете.');
+    if (legacyReadOnly(course.legacyMapping)) throw conflict('legacy_course_read_only', 'Исторические занятия пока редактируются в прежнем кабинете.');
     if (course.status !== 'active') throw conflict('course_not_active', 'Для планирования нужен активный курс.');
     await this.editor(tx, ctx, id);
     return course;
   }
 
-  private async selection(tx: Tx, courseId: string, teacherLinkIds: string[], participantEnrollmentIds: string[]) {
+  private async selection(tx: Tx, courseId: string, teacherLinkIds: string[], participantEnrollmentIds: string[], allowInactive = false) {
     const [teachers, enrollments] = await Promise.all([
-      tx.courseTeacher.findMany({ where: { id: { in: teacherLinkIds }, courseId, status: 'active' }, include: { membership: { include: { roles: true } } } }),
-      tx.enrollment.findMany({ where: { id: { in: participantEnrollmentIds }, courseId, status: 'active' }, include: { membership: { include: { roles: true } } } }),
+      tx.courseTeacher.findMany({ where: { id: { in: teacherLinkIds }, courseId, ...(allowInactive ? {} : { status: 'active' }) }, include: { membership: { include: { roles: true } } } }),
+      tx.enrollment.findMany({ where: { id: { in: participantEnrollmentIds }, courseId, ...(allowInactive ? {} : { status: 'active' }) }, include: { membership: { include: { roles: true } } } }),
     ]);
-    if (teachers.length !== teacherLinkIds.length || teachers.some(row => row.membership.status !== 'active' || !row.membership.roles.some(role => role.role === 'teacher' && !role.revokedAt)))
+    if (teachers.length !== teacherLinkIds.length || !allowInactive && teachers.some(row => row.membership.status !== 'active' || !row.membership.roles.some(role => role.role === 'teacher' && !role.revokedAt)))
       throw validationError('Выберите действующих преподавателей этого курса.', { teacherLinkIds: 'inactive_or_foreign' });
-    if (enrollments.length !== participantEnrollmentIds.length || enrollments.some(row => row.membership.status !== 'active' || !row.membership.roles.some(role => role.role === 'student' && !role.revokedAt)))
+    if (enrollments.length !== participantEnrollmentIds.length || !allowInactive && enrollments.some(row => row.membership.status !== 'active' || !row.membership.roles.some(role => role.role === 'student' && !role.revokedAt)))
       throw validationError('Выберите действующих учеников этого курса.', { participantEnrollmentIds: 'inactive_or_foreign' });
     return { teachers, enrollments, teacherUserIds: teachers.map(row => row.membership.userId), studentUserIds: enrollments.map(row => row.membership.userId) };
+  }
+
+  async prepareSeries(tx: Tx, ctx: WorkspaceContext, courseId: string, teacherLinkIds: string[], participantEnrollmentIds: string[], allowInactive = false) {
+    const course = allowInactive ? await tx.course.findFirst({ where: { id: courseId, workspaceId: ctx.workspaceId }, include: { legacyMapping: true } }) : await this.courseFor(tx, ctx, courseId);
+    if (!course) throw notFound();
+    if (allowInactive) await this.editor(tx, ctx, courseId);
+    const selected = await this.selection(tx, courseId, teacherLinkIds, participantEnrollmentIds, allowInactive);
+    return { course, selected };
+  }
+
+  seriesSchedule(prepared: Awaited<ReturnType<CourseLessonsService['prepareSeries']>>, startAt: Date, endAt: Date, timezone: string, format: CourseFormat) {
+    const result = this.schedule(prepared.course, startAt.toISOString(), endAt.toISOString(), timezone, format, prepared.selected.enrollments.length);
+    this.activeAtLesson(prepared.selected, result.startAt, result.endAt, prepared.course.timezone);
+    return result;
+  }
+
+  async insertPlanned(tx: Tx, ctx: WorkspaceContext, body: CreateCourseLessonDto,
+    selected: Awaited<ReturnType<CourseLessonsService['selection']>>, schedule: ReturnType<CourseLessonsService['schedule']>,
+    series?: { seriesId: string; seriesRevision: number; seriesOccurrenceKey: string }) {
+    const row = await tx.lesson.create({ data: {
+      courseId: body.courseId, topic: body.topic.trim(), startAt: schedule.startAt, endAt: schedule.endAt,
+      timezone: body.timezone, durationMinutes: schedule.durationMinutes, format: schedule.format,
+      note: body.note?.trim() || '', source: series ? 'template' : 'manual', status: 'planned', ...series,
+    } });
+    await tx.lessonTeacher.createMany({ data: selected.teachers.map(link => ({ lessonId: row.id, courseId: body.courseId, courseTeacherId: link.id })) });
+    await tx.lessonParticipant.createMany({ data: selected.enrollments.map(link => ({ lessonId: row.id, courseId: body.courseId, enrollmentId: link.id })) });
+    await this.audit(tx, ctx, row.id, 'lesson.created', { courseId: body.courseId, teacherCount: selected.teachers.length, participantCount: selected.enrollments.length, ...(series || {}) });
+    await this.learning.lessonChanged(tx, ctx, row.id, 'created');
+    return row;
   }
 
   private schedule(course: { startsOn: Date; endsOn: Date | null; timezone: string; defaultFormat: CourseFormat }, startAtInput: string, endAtInput: string, timezone: string, format?: CourseFormat, count?: number) {
@@ -212,15 +243,7 @@ export class CourseLessonsService {
         this.activeAtLesson(selected, schedule.startAt, schedule.endAt, course.timezone);
         if ((await lessonConflicts(tx, schedule.startAt, schedule.endAt, selected.teacherUserIds, selected.studentUserIds)).length)
           throw conflict('lesson_conflict', 'У одного из участников уже есть занятие в это время.');
-        const row = await tx.lesson.create({ data: {
-          courseId: course.id, topic: body.topic.trim(), startAt: schedule.startAt, endAt: schedule.endAt,
-          timezone: body.timezone, durationMinutes: schedule.durationMinutes, format: schedule.format,
-          note: body.note?.trim() || '', source: 'manual', status: 'planned',
-        } });
-        await tx.lessonTeacher.createMany({ data: selected.teachers.map(link => ({ lessonId: row.id, courseId: course.id, courseTeacherId: link.id })) });
-        await tx.lessonParticipant.createMany({ data: selected.enrollments.map(link => ({ lessonId: row.id, courseId: course.id, enrollmentId: link.id })) });
-        await this.audit(tx, ctx, row.id, 'lesson.created', { courseId: course.id, teacherCount: selected.teachers.length, participantCount: selected.enrollments.length });
-        await this.learning.lessonChanged(tx, ctx, row.id, 'created');
+        const row = await this.insertPlanned(tx, ctx, body, selected, schedule);
         const result = { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id: row.id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
         await tx.idempotencyRecord.create({ data: { ...identity, bodyHash, response: result as Prisma.InputJsonValue, expiresAt: new Date(Date.now() + 86400000) } });
         return result;
@@ -237,7 +260,8 @@ export class CourseLessonsService {
   private async editableLesson(tx: Tx, ctx: WorkspaceContext, id: string) {
     const row = await tx.lesson.findFirst({ where: { id, course: { workspaceId: ctx.workspaceId } }, include: lessonInclude });
     if (!row) throw notFound();
-    if (row.course.legacyMapping) throw conflict('legacy_lesson_read_only', 'Исторический урок редактируется в прежнем кабинете.');
+    if (legacyReadOnly(row.course.legacyMapping)) throw conflict('legacy_lesson_read_only', 'Исторический урок редактируется в прежнем кабинете.');
+    if (row.seriesId) await tx.$queryRaw`SELECT id FROM "LessonSeries" WHERE id=${row.seriesId} FOR UPDATE`;
     await this.editor(tx, ctx, row.courseId);
     return row;
   }
@@ -247,6 +271,7 @@ export class CourseLessonsService {
     return this.mutate(async tx => {
       const current = await this.editableLesson(tx, ctx, id);
       if (current.revision !== revision) throw revisionError();
+      if (current.seriesId && (body.reason?.trim().length || 0) < 5) throw validationError('Для исключения серии укажите причину от 5 символов.');
       if (!['planned', 'rescheduled'].includes(current.status)) throw conflict('invalid_state', 'Проведённый или отменённый урок нельзя менять.');
       const course = await this.courseFor(tx, ctx, current.courseId);
       const teacherLinkIds = body.teacherLinkIds || current.lessonTeachers.map(link => link.courseTeacherId);
@@ -265,6 +290,7 @@ export class CourseLessonsService {
         topic: body.topic?.trim(), startAt: schedule.startAt, endAt: schedule.endAt,
         timezone: body.timezone, durationMinutes: schedule.durationMinutes, format: schedule.format,
         note: body.note?.trim(), status: body.startAt || body.endAt ? 'rescheduled' : undefined,
+        seriesException: current.seriesId ? true : undefined,
         revision: { increment: 1 },
       } });
       if (!changed.count) throw revisionError();
@@ -276,7 +302,7 @@ export class CourseLessonsService {
         await tx.lessonParticipant.deleteMany({ where: { lessonId: id } });
         await tx.lessonParticipant.createMany({ data: selected.enrollments.map(link => ({ lessonId: id, courseId: course.id, enrollmentId: link.id })) });
       }
-      await this.audit(tx, ctx, id, 'lesson.updated', { courseId: course.id, participantCount: selected.enrollments.length, teacherCount: selected.teachers.length });
+      await this.audit(tx, ctx, id, 'lesson.updated', { courseId: course.id, participantCount: selected.enrollments.length, teacherCount: selected.teachers.length, reason: body.reason?.trim() || '', seriesException: Boolean(current.seriesId) });
       await this.learning.lessonChanged(tx, ctx, id, 'updated', [...new Set([...current.participants.map(p => p.enrollmentId), ...participantEnrollmentIds])], '', current.lessonTeachers.map(t => t.courseTeacher.membership.userId));
       return { item: dto(await tx.lesson.findUniqueOrThrow({ where: { id }, include: lessonInclude }), ctx), changed: ['lessons'], requestId: ctx.requestId };
     });
@@ -287,7 +313,7 @@ export class CourseLessonsService {
       const current = await this.editableLesson(tx, ctx, id);
       if (current.revision !== revision) throw revisionError();
       if (!['planned', 'rescheduled'].includes(current.status)) throw conflict('invalid_state', 'Урок уже завершён или отменён.');
-      const changed = await tx.lesson.updateMany({ where: { id, revision }, data: { status: 'canceled', revision: { increment: 1 } } });
+      const changed = await tx.lesson.updateMany({ where: { id, revision }, data: { status: 'canceled', seriesException: current.seriesId ? true : undefined, revision: { increment: 1 } } });
       if (!changed.count) throw revisionError();
       await this.audit(tx, ctx, id, 'lesson.canceled', { reason: body.reason.trim() });
       await this.learning.lessonChanged(tx, ctx, id, 'canceled');

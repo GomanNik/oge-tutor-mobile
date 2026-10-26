@@ -211,6 +211,22 @@ jobs:
       - name: Run AppModule e2e tests
         run: pnpm --dir oge-tutor-backend run test:e2e
 
+      - name: Build restored API
+        run: pnpm --dir oge-tutor-backend run build
+
+      - name: Restore database and files, then verify real API workflows
+        env:
+          RELEASE_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          RELEASE_DRILL_REPORT: test-results/release-restore-drill.json
+        run: pnpm --dir oge-tutor-backend run test:restore
+
+      - name: Upload restore proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-restore-proof
+          path: oge-tutor-backend/test-results/release-restore-drill.json
+
   browser-real-api:
     name: Browser Real API
     runs-on: ubuntu-latest
@@ -248,6 +264,14 @@ jobs:
       LEARNING_REAL_API_PASSWORD: BrowserCourse-CI-2026!
       LEARNING_REAL_API_STUDENT_EMAIL: learning-student@test.local
       LEARNING_REAL_API_STUDENT_PASSWORD: BrowserCourse-CI-2026!
+      SERIES_REAL_API_EMAIL: series-teacher@test.local
+      SERIES_REAL_API_PASSWORD: BrowserCourse-CI-2026!
+      SERIES_REAL_API_STUDENT_EMAIL: series-student@test.local
+      ACCOUNT_REAL_API_EMAIL: account@test.local
+      ACCOUNT_REAL_API_PASSWORD: BrowserCourse-CI-2026!
+      LEARNING_NOTIFICATIONS_WORKER_ENABLED: "false"
+      LESSON_SERIES_WORKER_ENABLED: "false"
+      WORKSPACE_INVITATIONS_WORKER_ENABLED: "false"
       WORKSPACE_ADMIN_EMAIL: browser-admin@test.local
       WORKSPACE_ADMIN_PASSWORD: BrowserSmoke-CI-2026!
       WORKSPACE_ADMIN_NAME: Browser Admin
@@ -289,13 +313,32 @@ jobs:
 
       - name: Test browser against real API
         run: |
-          pnpm --dir oge-tutor-backend start &
+          node oge-tutor-backend/dist/src/main.js &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then break; fi
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:3000/health >/dev/null
-          pnpm --dir oge-tutor-app run test:browser -- --grep 'real API'
+          pnpm --dir oge-tutor-app exec playwright test --grep 'real API' --output test-results/real-api
+          kill "$api_pid"
+          wait "$api_pid" || true
+          LEGACY_API_MODE=disabled LEGACY_CUTOVER_CONFIRM=verified-backup-and-reconciliation node oge-tutor-backend/dist/src/main.js &
+          api_pid=$!
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/health/ready >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/health/ready >/dev/null
+          CUTOVER_REAL_API=true pnpm --dir oge-tutor-app exec playwright test --grep 'cutover real API' --output test-results/cutover
+
+      - name: Upload real API screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-api-browser-results
+          path: oge-tutor-app/test-results/
 
   docker-build:
     name: Docker Build

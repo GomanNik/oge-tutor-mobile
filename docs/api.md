@@ -1,6 +1,14 @@
 # HTTP API
 
-This page describes the **currently implemented API**. Workspace identity, administration, the exam catalog, courses/rosters and group lessons are implemented under `/api/v2`. Assignments and recurring lesson series in [platform/api-target.md](platform/api-target.md) remain future design.
+This page describes the **implemented API in this branch**. Blocks 1–6 are accepted in main; Block 7 adds recurring lesson series, account recovery, reconciliation and controlled v1 retirement. Planned integrations in [platform/api-target.md](platform/api-target.md) are not implied by this implementation.
+
+## Recurring lessons and cutover v2 (Block 7)
+
+The [full Block 7 contract](platform/block-7-series-cutover.md) lists all eight `/api/v2/workspaces/:workspaceId/lesson-series` routes, rule limits, DST handling, preview tokens, idempotency and future-only changes. Series are managed by administrators and assigned teachers; students see only their concrete lessons. Single-instance edits require a reason and preserve a series exception. Apply requires a fresh signed preview, an idempotency key and, for an existing series, `If-Match`.
+
+`GET /api/v2/runtime` is public and reports `legacyApiMode`. `GET /api/v2/workspaces/:workspaceId/release-status` is admin-only and reports data invariants, not a completed backup/file verification. Public `POST /api/v2/auth/{password-reset,access-token/verify,access-token/complete}` and authenticated `POST /api/v2/me/password` remove the dependency on v1 for account security. Password change revokes all sessions and outstanding tokens; an incorrect current password returns 422.
+
+Legacy behavior below applies only while enabled/read_only. With `LEGACY_API_MODE=read_only`, educational v1 writes are forbidden. With `disabled`, all v1 routes return 410, imported v2 resources report `legacyReadOnly=false` and can be managed through v2. The `legacy` provenance flag remains true. v1 compatibility statements in historical block sections describe enabled/read_only behavior, not the post-cutover authority. Disabling persists a startup barrier; see the [operator runbook](platform/block-7-operations.md) before changing modes.
 
 The NestJS API listens on port `3000` by default. Swagger UI is at `/api/docs` when the backend runs. The legacy routes below have no `/api` prefix; new workspace routes use `/api/v2`. Protected calls use `Authorization: Bearer <JWT>`; health, login, password-reset, access-token verification/completion and v2 invitation acceptance for a new account are public. Rate limits apply to public authentication routes.
 

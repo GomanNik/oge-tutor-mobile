@@ -26,6 +26,22 @@ async function main() {
       const learningUser = await tx.user.create({ data: { email: 'learning-student@test.local', displayName: 'Ученик прогресса', passwordHash, role: 'student' } });
       const learningStudent = await tx.studentProfile.create({ data: { userId: learningUser.id, teacherId: learningTeacher.id, name: 'Ученик прогресса', grade: '9 класс', goal: 'ОГЭ', settings: {}, access: 'active' } });
       await ensureLegacyStudent(tx, learningStudent.id);
+      const seriesUser = await tx.user.create({ data: { email: 'series-teacher@test.local', displayName: 'Преподаватель серий', passwordHash, role: 'teacher' } });
+      const seriesTeacher = await tx.teacherProfile.create({ data: { userId: seriesUser.id, name: 'Преподаватель серий', settings: {} } });
+      const seriesWorkspace = await ensureLegacyTeacher(tx, seriesTeacher.id);
+      const seriesStudentUser = await tx.user.create({ data: { email: 'series-student@test.local', displayName: 'Ученик серии', passwordHash, role: 'student' } });
+      const seriesStudent = await tx.studentProfile.create({ data: { userId: seriesStudentUser.id, teacherId: seriesTeacher.id, name: 'Ученик серии', settings: {}, access: 'active' } });
+      const seriesMember = await ensureLegacyStudent(tx, seriesStudent.id);
+      const seriesLead = await tx.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: seriesWorkspace, userId: seriesUser.id } } });
+      for (const width of [390, 1365]) {
+        const courseId = `browser-series-course-${width}`;
+        await tx.course.create({ data: { id: courseId, workspaceId: seriesWorkspace, programVersionId: 'legacy-version-oge-math', title: `Серия браузер ${width}`, defaultFormat: 'group', capacity: 5, startsOn: new Date(), timezone: 'UTC', status: 'active' } });
+        await tx.courseTeacher.create({ data: { id: `browser-series-teacher-${width}`, workspaceId: seriesWorkspace, courseId, membershipId: seriesLead.id, role: 'lead', startsOn: new Date() } });
+        await tx.enrollment.create({ data: { id: `browser-series-enrollment-${width}`, workspaceId: seriesWorkspace, courseId, membershipId: seriesMember.id, status: 'active', startsOn: new Date() } });
+      }
+      const accountUser = await tx.user.create({ data: { email: 'account@test.local', displayName: 'Профиль браузера', passwordHash } });
+      const accountWorkspace = await tx.workspace.create({ data: { name: 'Проверка аккаунта', slug: 'browser-account-workspace' } });
+      await tx.workspaceMembership.create({ data: { workspaceId: accountWorkspace.id, userId: accountUser.id, roles: { create: [{ role: 'admin' }] } } });
     });
     console.log('Browser course fixture ready.');
   } finally {

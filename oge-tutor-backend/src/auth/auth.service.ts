@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { notFound, unauthorized } from '../common/app-error';
+import { conflict, notFound, unauthorized, validationError } from '../common/app-error';
 import { ACCESS_STATUS, ACCESS_TOKEN_TYPE, ROLE } from '../common/contracts';
 import { validateEmail, validatePassword } from '../common/validation';
 import { AccessTokenService } from './access-token.service';
@@ -52,8 +52,9 @@ export class AuthService {
     return user;
   }
 
-  async signAccountSession(userId: string) {
+  async signAccountSession(userId: string, expectedPasswordHash?: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (expectedPasswordHash !== undefined && user.passwordHash !== expectedPasswordHash) throw unauthorized();
     const sessionId = randomUUID();
     const token = this.createToken(user, sessionId);
     const { exp } = this.jwt.decode<{ exp: number }>(token);
@@ -74,14 +75,29 @@ export class AuthService {
     );
   }
 
-  async requestPasswordReset(emailInput: unknown) {
+  async requestPasswordReset(emailInput: unknown, accountMode = false) {
     const email = validateEmail(emailInput);
     const user = await this.prisma.user.findUnique({ where: { email }, include: { studentProfile: true } });
     if (!user) return { ok: true };
-    if (user.role === ROLE.STUDENT && user.studentProfile?.access === ACCESS_STATUS.DISABLED) return { ok: true };
+    if (!accountMode && user.role === ROLE.STUDENT && user.studentProfile?.access === ACCESS_STATUS.DISABLED) return { ok: true };
     const reset = await this.accessTokens.createForUser(user.id, ACCESS_TOKEN_TYPE.PASSWORD_RESET);
     await this.mailer.sendAccessTokenLink({ email: user.email, type: ACCESS_TOKEN_TYPE.PASSWORD_RESET, delivery: reset.delivery, preview: reset.preview });
     return reset.preview ? { ok: true, reset: reset.preview } : { ok: true };
+  }
+
+  async changeAccountPassword(userId: string, currentPassword: string, newPasswordInput: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!await bcrypt.compare(currentPassword, user.passwordHash)) throw validationError('Неверный текущий пароль.', { currentPassword: 'incorrect' });
+    const newPassword = validatePassword(newPasswordInput);
+    if (Buffer.byteLength(newPassword, 'utf8') > 72) throw validationError('Новый пароль должен занимать не более 72 байт UTF-8.');
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.$transaction(async tx => {
+      const updated = await tx.user.updateMany({ where: { id: userId, passwordHash: user.passwordHash }, data: { passwordHash, sessionVersion: { increment: 1 }, revision: { increment: 1 } } });
+      if (updated.count !== 1) throw conflict('Пароль изменился параллельно. Повторите вход.');
+      await tx.authSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await tx.accessToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });
+    });
+    return { ok: true };
   }
 
   async signSession(user: { id: string; email: string; role: string | null; passwordHash?: string }): Promise<SessionPayload> {

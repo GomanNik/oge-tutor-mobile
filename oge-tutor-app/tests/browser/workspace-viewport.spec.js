@@ -8,7 +8,8 @@ async function stubApi(page) {
   await page.route('**/api/v2/**', route => {
     const { pathname } = new URL(route.request().url());
     let body;
-    if (pathname === '/api/v2/auth/login') body = { session: { token: 'browser-test-token' }, user, contexts: [context] };
+    if (pathname === '/api/v2/runtime') body = { apiVersion: 2, legacyApiMode: 'enabled', legacyDataRetained: true };
+    else if (pathname === '/api/v2/auth/login') body = { session: { token: 'browser-test-token' }, user, contexts: [context] };
     else if (pathname === '/api/v2/me') body = { item: user };
     else if (pathname === '/api/v2/me/workspaces') body = { items: [context] };
     else if (pathname.endsWith('/members')) body = { items: [member], pageInfo: { hasMore: false, nextCursor: null } };
